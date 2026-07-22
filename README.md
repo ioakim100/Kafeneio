@@ -12,7 +12,9 @@ Every waiter opens it in a phone browser on the same Wi-Fi. No accounts, no clou
 - **Split the bill** — several payments of any amount, cash or card/POS, until the balance hits zero.
 - **Reports** (admin) — calendar of daily takings, cash vs card, products sold, per-waiter totals.
 
-Default logins: **Manager** (admin), **Maria**, **Nikos** (waiters) — no PINs set.
+Default logins (change the PINs in Setup): **Manager** admin — PIN **1234**; **Maria** — **1111**; **Nikos** — **2222**. Everyone needs a PIN, so a customer opening the address can't get in.
+
+Handy behaviours: pressing **Send order** fires silently and drops you back on the tables for the next one; a prep printer marked **All** gets a one-ticket copy of the whole order while items still go to their own stations; on a prep screen you can tap an item to mark it delivered and **undo** it from "Recently delivered"; and at payment you can switch to **Pick items** to charge one guest for just their items.
 
 ## Run it
 1. Install **Node.js 18+** — https://nodejs.org

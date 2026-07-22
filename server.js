@@ -67,9 +67,9 @@ const SEED = {
     { id: "m15", name: "Baklava", price: 4.5, cat: "Dessert", printerId: "pb" },
   ],
   waiters: [
-    { id: "w0", name: "Manager", color: "#C98FE8", role: "admin", pin: "" },
-    { id: "w1", name: "Maria", color: "#E8A23D", role: "waiter", pin: "" },
-    { id: "w2", name: "Nikos", color: "#7BC49A", role: "waiter", pin: "" },
+    { id: "w0", name: "Manager", color: "#C98FE8", role: "admin", pin: "1234" },
+    { id: "w1", name: "Maria", color: "#E8A23D", role: "waiter", pin: "1111" },
+    { id: "w2", name: "Nikos", color: "#7BC49A", role: "waiter", pin: "2222" },
   ],
   open: {},
   sales: [],
@@ -190,17 +190,21 @@ async function handleAction(type, payload = {}, waiterId) {
     case "changeQty": { const o = state.open[p.tableId]; if (!o) break; o.items[p.index].qty += p.delta; o.items = o.items.filter((x) => x.qty > 0); if (!o.items.length) delete state.open[p.tableId]; break; }
     case "removeItem": { const o = state.open[p.tableId]; if (!o) break; o.items.splice(p.index, 1); if (!o.items.length) delete state.open[p.tableId]; break; }
     case "setNote": { const o = state.open[p.tableId]; if (o && o.items[p.index]) o.items[p.index].note = p.note; break; }
-    case "setDone": { const o = state.open[p.tableId]; if (o) { const it = o.items.find((x) => x.lid === p.lid); if (it) it.done = p.done; } break; }
-    case "bumpStation": { const o = state.open[p.tableId]; if (o) o.items.forEach((x) => { if (x.printerId === p.printerId && x.sent) x.done = true; }); break; }
+    case "setDone": { const o = state.open[p.tableId]; if (o) { const it = o.items.find((x) => x.lid === p.lid); if (it) { it.done = p.done; it.doneAt = p.done ? new Date().toISOString() : null; } } break; }
+    case "bumpStation": { const o = state.open[p.tableId]; if (o) o.items.forEach((x) => { if (x.printerId === p.printerId && x.sent && !x.done) { x.done = true; x.doneAt = new Date().toISOString(); } }); break; }
     case "placeOrder": {
       const o = state.open[p.tableId]; if (!o) { print = { ok: false }; break; }
       const t = state.tables.find((x) => x.id === p.tableId);
       const newly = o.items.filter((x) => !x.sent);
       newly.forEach((x) => { x.sent = true; x.placedAt = new Date().toISOString(); });
-      const groups = {};
-      newly.forEach((x) => { if (x.printerId && x.printerId !== state.receiptPrinterId) (groups[x.printerId] = groups[x.printerId] || []).push(x); });
+      const prepNewly = newly.filter((x) => x.printerId && x.printerId !== state.receiptPrinterId);
       const results = [];
-      for (const pid of Object.keys(groups)) { const pr = printerById(pid); if (pr) results.push(await printPrep(pr, t?.name, waiterId, groups[pid])); }
+      for (const pr of state.printers) {
+        if (pr.id === state.receiptPrinterId) continue;
+        const items = pr.all ? prepNewly : prepNewly.filter((x) => x.printerId === pr.id); // pr.all = expo, gets everything
+        if (!items.length) continue;
+        results.push(await printPrep(pr, t?.name, waiterId, items));
+      }
       print = { ok: results.every((r) => r.ok), results, fired: newly.length };
       break;
     }
@@ -213,7 +217,7 @@ async function handleAction(type, payload = {}, waiterId) {
     case "pay": {
       const o = state.open[p.tableId]; if (!o) break;
       o.payments = o.payments || [];
-      o.payments.push({ amount: round2(p.amount), method: p.method, waiterId, at: new Date().toISOString() });
+      o.payments.push({ amount: round2(p.amount), method: p.method, waiterId, at: new Date().toISOString(), lines: p.lines || null });
       const total = orderTotal(o), paid = round2(o.payments.reduce((s, x) => s + x.amount, 0));
       if (paid + 0.005 >= total) {
         const t = state.tables.find((x) => x.id === p.tableId);

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Kafeneío POS</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -20,6 +20,7 @@
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(232,162,61,0)}50%{box-shadow:0 0 0 6px rgba(232,162,61,.16)}}
   .pulse{animation:pulse 1.7s ease-in-out infinite}
   @keyframes pop{from{transform:scale(.96);opacity:.4}to{transform:scale(1);opacity:1}}.pop{animation:pop .12s ease}
+  @keyframes slidein{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}.toast{animation:slidein .18s ease}
 </style>
 </head>
 <body>
@@ -45,6 +46,7 @@ const euro=(n)=>"€"+(Number(n)||0).toFixed(2);
 const round2=(n)=>Math.round(n*100)/100;
 const orderTotal=(o)=>round2((o?.items||[]).reduce((s,x)=>s+x.price*x.qty,0));
 const paidSum=(o)=>round2((o?.payments||[]).reduce((s,x)=>s+x.amount,0));
+const paidQtyMap=(o)=>{const m={};(o?.payments||[]).forEach(p=>(p.lines||[]).forEach(l=>{m[l.lid]=(m[l.lid]||0)+l.qty;}));return m;};
 const dayKey=(d)=>{const x=new Date(d);return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`;};
 const relTime=(iso,now)=>{if(!iso)return"";const s=Math.max(0,Math.floor((now-new Date(iso).getTime())/1000));if(s<60)return"just now";const m=Math.floor(s/60);if(m<60)return m+" min";return Math.floor(m/60)+"h "+(m%60)+"m";};
 const tableStatus=(o)=>{if(!o||!o.items.length)return"free";if(o.items.some(x=>!x.sent))return"new";if(o.items.some(x=>x.sent&&!x.done))return"prep";return"served";};
@@ -52,6 +54,12 @@ const tableStatus=(o)=>{if(!o||!o.items.length)return"free";if(o.items.some(x=>!
 let PRINTERS=[];
 const pColor=(id)=>{const p=PRINTERS.find(x=>x.id===id);return p?p.color:C.subtle;};
 const pName=(id)=>{const p=PRINTERS.find(x=>x.id===id);return p?p.name:"—";};
+let WAITERS=[];
+const wColor=(id)=>{const w=WAITERS.find(x=>x.id===id);return w?w.color:C.subtle;};
+const wLabel=(id)=>{const w=WAITERS.find(x=>x.id===id);return w?w.name:"";};
+
+function useIsMobile(bp=760){const [m,setM]=useState(typeof window!=="undefined"&&window.innerWidth<bp);
+  useEffect(()=>{const f=()=>setM(window.innerWidth<bp);window.addEventListener("resize",f);return()=>window.removeEventListener("resize",f);},[]);return m;}
 
 const PATHS={ coffee:"M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4z",
   grid:"M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z", list:"M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
@@ -59,12 +67,13 @@ const PATHS={ coffee:"M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-
   glass:"M6 3h12l-1 8a5 5 0 01-10 0zM12 16v5M8 21h8", chart:"M18 20V10M12 20V4M6 20v-6",
   sliders:"M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   plus:"M12 5v14M5 12h14", minus:"M5 12h14", x:"M18 6 6 18M6 6l12 12", check:"M20 6 9 17l-5-5",
-  circle:"M12 21a9 9 0 100-18 9 9 0 000 18z", trash:"M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14",
-  printer:"M6 9V2h12v7M6 18H4v-6h16v6h-2M8 14h8v6H8z", back:"M19 12H5M12 19l-7-7 7-7",
-  left:"M15 18l-6-6 6-6", right:"M9 18l6-6-6-6", move:"M12 2v20M2 12h20M5 9 2 12l3 3M19 9l3 3-3 3M9 5l3-3 3 3M9 19l3 3 3-3",
+  circle:"M12 21a9 9 0 100-18 9 9 0 000 18z", undo:"M3 7v6h6M3 13a9 9 0 103-7.7L3 8",
+  trash:"M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14", printer:"M6 9V2h12v7M6 18H4v-6h16v6h-2M8 14h8v6H8z",
+  back:"M19 12H5M12 19l-7-7 7-7", left:"M15 18l-6-6 6-6", right:"M9 18l6-6-6-6",
+  move:"M12 2v20M2 12h20M5 9 2 12l3 3M19 9l3 3-3 3M9 5l3-3 3 3M9 19l3 3 3-3",
   clock:"M12 22a10 10 0 100-20 10 10 0 000 20zM12 6v6l4 2", send:"M22 2 11 13M22 2l-7 20-4-9-9-4z",
   card:"M2 7h20v10H2zM2 11h20", cash:"M2 6h20v12H2zM12 15a3 3 0 100-6 3 3 0 000 6z",
-  note:"M11 4H4v16h16v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z", square:"M4 4h16v16H4z",
+  note:"M11 4H4v16h16v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z", lock:"M5 11h14v10H5zM8 11V7a4 4 0 018 0v4",
   logout:"M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" };
 function Ico({n,size=18,color="currentColor"}){return(<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={PATHS[n]}/></svg>);}
 
@@ -78,20 +87,23 @@ function App(){
   const [view,setView]=useState("floor");const [now,setNow]=useState(Date.now());
   const [floorId,setFloorId]=useState(null);const [arrange,setArrange]=useState(false);
   const [activeId,setActiveId]=useState(null);const [payId,setPayId]=useState(null);const [receipt,setReceipt]=useState(null);
+  const [toast,setToast]=useState(null);
+  const mob=useIsMobile();
   useEffect(()=>{WAITER=waiter;},[waiter]);
   useEffect(()=>{const i=setInterval(()=>setNow(Date.now()),15000);return()=>clearInterval(i);},[]);
   useEffect(()=>{const es=new EventSource("/api/events");es.onmessage=(e)=>{const s=JSON.parse(e.data);setState(s);setFloorId((f)=>f||(s.floors[0]&&s.floors[0].id));};return()=>es.close();},[]);
+  const showToast=(t,c)=>{setToast({t,c});setTimeout(()=>setToast(null),2600);};
 
   if(!state) return <Center><div style={{color:C.mute}}>Connecting…</div></Center>;
   if(!waiter) return <Login waiters={state.waiters} onLogin={(w)=>{localStorage.setItem("waiter",JSON.stringify(w));setWaiter(w);}}/>;
-  PRINTERS=state.printers;
+  PRINTERS=state.printers; WAITERS=state.waiters;
   const isAdmin=waiter.role==="admin";
   const open=state.open, tables=state.tables, floors=state.floors, waiters=state.waiters;
   const prepPrinters=state.printers.filter((p)=>p.id!==state.receiptPrinterId);
   const tabs=[{id:"floor",label:"Floor",icon:"grid"},{id:"orders",label:"Orders",icon:"list"},
     ...prepPrinters.map((p)=>({id:"prep:"+p.id,label:p.name,icon:/bar/i.test(p.name)?"glass":/kitchen/i.test(p.name)?"chef":"printer"})),
     ...(isAdmin?[{id:"reports",label:"Reports",icon:"chart"},{id:"setup",label:"Setup",icon:"sliders"}]:[])];
-  if(!tabs.find((t)=>t.id===view)) { setView("floor"); }
+  if(!tabs.find((t)=>t.id===view)) setView("floor");
 
   const floorTables=tables.filter((t)=>t.floorId===floorId);
   const active=activeId?tables.find((t)=>t.id===activeId):null;const activeOrder=activeId?open[activeId]:null;
@@ -99,56 +111,58 @@ function App(){
   const wname=(id)=>{const w=waiters.find((w)=>w.id===id);return w?w.name:"—";};
   const prepView=view.startsWith("prep:")?state.printers.find((p)=>p.id===view.slice(5)):null;
 
-  const placeStatus=(r)=>{const pr=r&&r.print;if(!pr)return{t:"Order registered",c:C.mute};
-    if(!pr.results||!pr.results.length)return{t:"✓ Order sent",c:C.green};
-    if(pr.results.every((x)=>x.ok))return{t:"✓ Sent to "+pr.results.map((x)=>x.name).join(", "),c:C.green};
-    return{t:"Order registered — offline: "+pr.results.filter((x)=>!x.ok).map((x)=>x.name).join(", "),c:C.amber};};
-  const billStatus=(r)=>{const pr=r&&r.print;if(!pr)return{t:"",c:C.mute};if(pr.ok)return{t:"✓ Sent to receipt printer",c:C.green};
-    return{t:pr.reason==="no-ip"?"No receipt printer set — showing preview":"Receipt printer offline — showing preview",c:C.amber};};
-
-  const onPlace=async(t)=>{const o=open[t.id];const newly=(o.items||[]).filter((x)=>!x.sent);const res=await act("placeOrder",{tableId:t.id});
-    setReceipt({title:"ORDER SENT",priced:false,tableName:t.name,servedBy:waiter.name,items:newly,status:placeStatus(res)});};
+  const onPlace=async(t)=>{
+    const res=await act("placeOrder",{tableId:t.id});
+    setActiveId(null); setView("floor");     // straight back to the tables for the next order
+    const pr=res&&res.print;
+    if(!pr||!pr.results||!pr.results.length) showToast("✓ "+t.name+" — order sent",C.green);
+    else if(pr.results.every((x)=>x.ok)) showToast("✓ "+t.name+" sent to "+pr.results.map((x)=>x.name).join(", "),C.green);
+    else showToast(t.name+" sent · offline: "+pr.results.filter((x)=>!x.ok).map((x)=>x.name).join(", "),C.amber);
+  };
+  const billStatus=(r)=>{const pr=r&&r.print;if(!pr)return{t:"",c:C.mute};if(pr.ok)return{t:"✓ Sent to receipt printer",c:C.green};return{t:pr.reason==="no-ip"?"No receipt printer set — showing preview":"Receipt printer offline — showing preview",c:C.amber};};
   const onBill=async(t)=>{const o=open[t.id];const res=await act("printBill",{tableId:t.id});
     setReceipt({title:"KAFENEÍO",priced:true,tableName:t.name,servedBy:waiter.name,items:o.items,total:orderTotal(o),payments:o.payments||[],status:billStatus(res)});};
-  const doPay=async(amount,method)=>{const res=await act("pay",{tableId:payId,amount,method});if(res.sale){setPayId(null);
+  const doPay=async(amount,method,lines)=>{const res=await act("pay",{tableId:payId,amount,method,lines});if(res.sale){setPayId(null);
     setReceipt({title:"KAFENEÍO",priced:true,tableName:res.sale.tableName,servedBy:wname(res.sale.waiterId),items:res.sale.items,total:res.sale.total,payments:res.sale.payments,method:res.sale.method,status:billStatus(res)});}};
 
   return (
     <div style={{background:C.ink,minHeight:"100vh",color:C.text,fontFamily:SANS,maxWidth:1100,margin:"0 auto",position:"relative"}}>
       <TopBar tabs={tabs} view={view} setView={setView} waiter={waiter} openCount={Object.keys(open).length} onLogout={()=>{localStorage.removeItem("waiter");setWaiter(null);}}/>
-      <div style={{padding:16}}>
+      <div style={{padding:mob?10:16}}>
         {view==="floor"&&<Floor floors={floors} floorId={floorId} setFloorId={setFloorId} tables={floorTables} open={open} arrange={arrange} setArrange={setArrange} now={now} isAdmin={isAdmin} onPick={(t)=>setActiveId(t.id)}/>}
         {view==="orders"&&<Orders open={open} tables={tables} floors={floors} now={now} onPick={(t)=>setActiveId(t.id)}/>}
-        {prepView&&<Prep printer={prepView} open={open} tables={tables} floors={floors} now={now}/>}
+        {prepView&&<Prep printer={prepView} receiptId={state.receiptPrinterId} open={open} tables={tables} floors={floors} now={now}/>}
         {view==="reports"&&isAdmin&&<Reports sales={state.sales} waiters={waiters}/>}
-        {view==="setup"&&isAdmin&&<Setup state={state}/>}
+        {view==="setup"&&isAdmin&&<Setup state={state} mob={mob}/>}
       </div>
-      {active&&<OrderScreen table={active} order={activeOrder} menu={state.menu} wname={wname}
+      {active&&<OrderScreen table={active} order={activeOrder} menu={state.menu} wname={wname} mob={mob}
         onAdd={(m)=>act("addItem",{tableId:active.id,item:{id:m.id,name:m.name,price:m.price,printerId:m.printerId}})}
         onQty={(i,d)=>act("changeQty",{tableId:active.id,index:i,delta:d})} onRemove={(i)=>act("removeItem",{tableId:active.id,index:i})}
         onNote={(i,note)=>act("setNote",{tableId:active.id,index:i,note})} onClose={()=>setActiveId(null)}
         onPlace={()=>onPlace(active)} onBill={()=>onBill(active)} onPay={()=>setPayId(active.id)}/>}
-      {payTable&&payOrder&&<PayModal name={payTable.name} order={payOrder} onAdd={doPay} onCancel={()=>setPayId(null)}/>}
+      {payTable&&payOrder&&<PayModal name={payTable.name} order={payOrder} mob={mob} onAdd={doPay} onCancel={()=>setPayId(null)}/>}
       {receipt&&<Receipt data={receipt} onClose={()=>setReceipt(null)}/>}
+      {toast&&<div className="toast" style={{position:"fixed",left:"50%",transform:"translateX(-50%)",bottom:20,zIndex:40,background:C.panel3,border:`1px solid ${toast.c}`,color:C.text,borderRadius:12,padding:"12px 18px",fontSize:13.5,fontWeight:600,maxWidth:"90%",textAlign:"center",boxShadow:"0 8px 24px rgba(0,0,0,.4)"}}>{toast.t}</div>}
     </div>
   );
 }
 
-/* ---------- login ---------- */
+/* ---------- login (always asks PIN) ---------- */
 function Login({waiters,onLogin}){
   const [sel,setSel]=useState(null);const [pin,setPin]=useState("");const [err,setErr]=useState("");
   const submit=async(name,p)=>{const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,pin:p})});if(r.ok)onLogin((await r.json()).waiter);else setErr("Wrong PIN");};
   return(<Center><div style={{width:320,textAlign:"center"}}>
     <div style={{width:54,height:54,borderRadius:16,background:`linear-gradient(135deg,${C.amber},#C97B2A)`,display:"grid",placeItems:"center",margin:"0 auto 16px"}}><Ico n="coffee" size={28} color={C.ink}/></div>
     <div style={{fontWeight:800,fontSize:20}}>Kafeneío POS</div><div style={{color:C.mute,fontSize:13,margin:"4px 0 22px"}}>Who's on shift?</div>
-    {!sel?(<div style={{display:"grid",gap:8}}>{waiters.map((w)=>(<button key={w.id} className="btn" onClick={()=>{setErr("");setSel(w);submit(w.name,"").catch(()=>{});}}
+    {!sel?(<div style={{display:"grid",gap:8}}>{waiters.map((w)=>(<button key={w.id} className="btn" onClick={()=>{setErr("");setPin("");setSel(w);}}
         style={{display:"flex",alignItems:"center",gap:12,background:C.panel,border:`1px solid ${C.line}`,borderRadius:12,padding:"14px 16px",color:C.text,cursor:"pointer"}}>
         <span style={{width:12,height:12,borderRadius:12,background:w.color}}/><span style={{fontWeight:700,fontSize:15,flex:1,textAlign:"left"}}>{w.name}</span>
-        {w.role==="admin"&&<span style={{fontSize:10,fontWeight:800,color:C.violet,border:`1px solid ${C.violet}`,borderRadius:5,padding:"1px 6px"}}>ADMIN</span>}</button>))}</div>
+        {w.role==="admin"&&<span style={{fontSize:10,fontWeight:800,color:C.violet,border:`1px solid ${C.violet}`,borderRadius:5,padding:"1px 6px"}}>ADMIN</span>}</button>))}
+        <div style={{color:C.subtle,fontSize:11.5,marginTop:6}}><Ico n="lock" size={11}/> A PIN is required — customers can't get in without it.</div></div>
     ):(<div style={{display:"grid",gap:10}}>
       <div className="flex ac" style={{gap:12,justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:12,background:sel.color}}/><span style={{fontWeight:700}}>{sel.name}</span></div>
-      <div style={{color:C.mute,fontSize:12}}>Enter PIN (if set)</div>
-      <input autoFocus type="password" inputMode="numeric" value={pin} onChange={(e)=>setPin(e.target.value)} style={{...INP,textAlign:"center",fontSize:20,letterSpacing:4}}/>
+      <div style={{color:C.mute,fontSize:12}}>Enter PIN</div>
+      <input autoFocus type="password" inputMode="numeric" value={pin} onChange={(e)=>setPin(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")submit(sel.name,pin);}} style={{...INP,textAlign:"center",fontSize:22,letterSpacing:6}}/>
       {err&&<div style={{color:C.red,fontSize:12}}>{err}</div>}
       <button className="btn" onClick={()=>submit(sel.name,pin)} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:800,cursor:"pointer"}}>Start shift</button>
       <button onClick={()=>{setSel(null);setPin("");setErr("");}} style={{...BIG,background:"transparent",border:`1px solid ${C.line}`,color:C.mute,cursor:"pointer"}}>Back</button></div>)}
@@ -160,50 +174,51 @@ function TopBar({tabs,view,setView,waiter,openCount,onLogout}){
   return(<div style={{position:"sticky",top:0,zIndex:5,background:`linear-gradient(${C.panel},#1a1613)`,borderBottom:`1px solid ${C.line}`}}>
     <div className="flex ac" style={{gap:10,padding:"12px 14px 6px"}}>
       <div style={{width:28,height:28,borderRadius:8,background:`linear-gradient(135deg,${C.amber},#C97B2A)`,display:"grid",placeItems:"center"}}><Ico n="coffee" size={16} color={C.ink}/></div>
-      <div style={{flex:1}}><div style={{fontWeight:800,fontSize:15}}>Kafeneío POS</div><div style={{fontSize:10.5,color:C.mute,fontFamily:MONO,letterSpacing:1}}>{dayKey(new Date())}{openCount?` · ${openCount} open`:""}</div></div>
+      <div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:15}}>Kafeneío POS</div><div style={{fontSize:10.5,color:C.mute,fontFamily:MONO,letterSpacing:1}}>{dayKey(new Date())}{openCount?` · ${openCount} open`:""}</div></div>
       <button className="btn" onClick={onLogout} style={{display:"flex",alignItems:"center",gap:7,background:C.panel2,border:`1px solid ${C.line}`,borderRadius:20,padding:"6px 12px",color:C.text,cursor:"pointer"}}>
-        <span style={{width:9,height:9,borderRadius:9,background:waiter.color}}/><span style={{fontSize:12.5,fontWeight:700}}>{waiter.name}</span>
-        {waiter.role==="admin"&&<span style={{fontSize:9,fontWeight:800,color:C.violet}}>ADMIN</span>}<Ico n="logout" size={13} color={C.mute}/></button>
+        <span style={{width:9,height:9,borderRadius:9,background:waiter.color}}/><span style={{fontSize:12.5,fontWeight:700}}>{waiter.name}</span><Ico n="logout" size={13} color={C.mute}/></button>
     </div>
     <div className="flex" style={{gap:2,padding:"4px 6px 0",overflowX:"auto"}}>
-      {tabs.map((t)=>{const on=view===t.id;return(<button key={t.id} onClick={()=>setView(t.id)} className="flex ac" style={{gap:6,padding:"9px 12px",border:"none",background:"transparent",cursor:"pointer",
-        color:on?C.amber:C.mute,fontWeight:on?700:500,fontSize:13,borderBottom:`2px solid ${on?C.amber:"transparent"}`,whiteSpace:"nowrap"}}><Ico n={t.icon} size={15}/> {t.label}</button>);})}
+      {tabs.map((t)=>{const on=view===t.id;return(<button key={t.id} onClick={()=>setView(t.id)} className="flex ac" style={{gap:6,padding:"9px 12px",border:"none",background:"transparent",cursor:"pointer",color:on?C.amber:C.mute,fontWeight:on?700:500,fontSize:13,borderBottom:`2px solid ${on?C.amber:"transparent"}`,whiteSpace:"nowrap"}}><Ico n={t.icon} size={15}/> {t.label}</button>);})}
     </div>
   </div>);
 }
 
 /* ---------- floor ---------- */
 function Floor({floors,floorId,setFloorId,tables,open,arrange,setArrange,now,isAdmin,onPick}){
-  const [sel,setSel]=useState(null);
-  const selTable=tables.find((t)=>t.id===sel);
+  const [sel,setSel]=useState(null);const selTable=tables.find((t)=>t.id===sel);
   return(<div>
     <div className="flex ac jb wrap" style={{gap:10,marginBottom:10}}>
       <div className="flex wrap" style={{gap:6}}>{floors.map((f)=>(<button key={f.id} onClick={()=>setFloorId(f.id)} style={{padding:"7px 14px",borderRadius:20,fontSize:13,fontWeight:floorId===f.id?700:500,cursor:"pointer",border:`1px solid ${floorId===f.id?C.amber:C.line}`,background:floorId===f.id?C.amber:"transparent",color:floorId===f.id?C.ink:C.mute}}>{f.name}</button>))}</div>
       {isAdmin&&<div className="flex" style={{gap:8}}>
-        {arrange&&<button className="btn" onClick={()=>{act("addTable",{floorId,name:"T"+(tables.length+1),seats:4,x:50,y:50});}} style={{display:"flex",alignItems:"center",gap:6,...SMALL,background:C.panel3,color:C.text,cursor:"pointer"}}><Ico n="plus" size={15}/> Add</button>}
+        {arrange&&<button className="btn" onClick={()=>act("addTable",{floorId,name:"T"+(tables.length+1),seats:4,x:50,y:50})} style={{display:"flex",alignItems:"center",gap:6,...SMALL,background:C.panel3,color:C.text,cursor:"pointer"}}><Ico n="plus" size={15}/> Add</button>}
         <button className="btn" onClick={()=>{setArrange(!arrange);setSel(null);}} style={{display:"flex",alignItems:"center",gap:6,...SMALL,background:arrange?C.amber:C.panel3,color:arrange?C.ink:C.text,fontWeight:700,cursor:"pointer"}}>{arrange?<React.Fragment><Ico n="check" size={15}/> Done</React.Fragment>:<React.Fragment><Ico n="move" size={15}/> Arrange</React.Fragment>}</button>
       </div>}
     </div>
     <div className="flex wrap" style={{gap:14,marginBottom:10,fontSize:11.5,color:C.mute}}>{["free","new","prep","served"].map((s)=>(<span key={s} className="flex ac" style={{gap:6}}><span style={{width:9,height:9,borderRadius:9,background:STCOL[s]}}/>{STLABEL[s]}</span>))}</div>
-    {arrange&&<div style={{fontSize:12.5,color:C.mute,marginBottom:10}}>Drag to position. Tap a table to change its shape, size or seats.</div>}
+    {arrange&&<div style={{fontSize:12.5,color:C.mute,marginBottom:10}}>Drag to position. Tap a table to change shape, size or seats.</div>}
     <FloorPlan tables={tables} arrange={arrange} open={open} now={now} sel={sel} onSelect={setSel} onPick={onPick}/>
     {arrange&&selTable&&<TableEditor t={selTable} onClose={()=>setSel(null)}/>}
   </div>);
 }
 function FloorPlan({tables,arrange,open,now,sel,onSelect,onPick}){
-  const ref=useRef(null),drag=useRef(null);const [local,setLocal]=useState({});
+  const ref=useRef(null),drag=useRef(null);const [local,setLocal]=useState({});const [w,setW]=useState(700);
+  useEffect(()=>{const el=ref.current;if(!el||!window.ResizeObserver)return;const ro=new ResizeObserver((es)=>setW(es[0].contentRect.width));ro.observe(el);return()=>ro.disconnect();},[]);
+  const scale=Math.max(0.52,Math.min(1,w/780));           // shrink tables on narrow phones so they don't overlap
+  const H=Math.max(340,Math.min(520,w*0.72));
   const pct=(e)=>{const r=ref.current.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100};};
   const down=(e,t)=>{if(!arrange)return;e.currentTarget.setPointerCapture(e.pointerId);const p=pct(e);drag.current={id:t.id,dx:t.x-p.x,dy:t.y-p.y,moved:false};};
-  const move=(e)=>{if(!drag.current)return;const p=pct(e);let x=Math.max(7,Math.min(93,p.x+drag.current.dx)),y=Math.max(10,Math.min(90,p.y+drag.current.dy));drag.current.moved=true;setLocal((l)=>({...l,[drag.current.id]:{x,y}}));};
-  const up=(t)=>{if(drag.current){const d=drag.current;const wasMove=d.moved;drag.current=null;if(wasMove){const pos=local[d.id];if(pos)act("moveTable",{tableId:d.id,x:pos.x,y:pos.y});}else if(arrange){onSelect(t.id);}}};
-  return(<div ref={ref} style={{position:"relative",width:"100%",height:480,borderRadius:16,background:`radial-gradient(circle at 1px 1px, ${C.line} 1px, transparent 0) 0 0 / 26px 26px, ${C.plan}`,border:`1px solid ${C.line}`,overflow:"hidden",touchAction:arrange?"none":"auto"}}>
+  const move=(e)=>{if(!drag.current)return;const p=pct(e);let x=Math.max(7,Math.min(93,p.x+drag.current.dx)),y=Math.max(9,Math.min(91,p.y+drag.current.dy));drag.current.moved=true;setLocal((l)=>({...l,[drag.current.id]:{x,y}}));};
+  const up=(t)=>{if(drag.current){const d=drag.current;drag.current=null;if(d.moved){const pos=local[d.id];if(pos)act("moveTable",{tableId:d.id,x:pos.x,y:pos.y});}else if(arrange)onSelect(t.id);}};
+  return(<div ref={ref} style={{position:"relative",width:"100%",height:H,borderRadius:16,background:`radial-gradient(circle at 1px 1px, ${C.line} 1px, transparent 0) 0 0 / ${Math.round(26*scale)}px ${Math.round(26*scale)}px, ${C.plan}`,border:`1px solid ${C.line}`,overflow:"hidden",touchAction:arrange?"none":"auto"}}>
     {tables.length===0&&<div style={{position:"absolute",inset:0,display:"grid",placeItems:"center",color:C.subtle,fontSize:13}}>No tables on this floor.</div>}
-    {tables.map((t)=>{const o=open[t.id];const st=tableStatus(o);const busy=st!=="free";const sc=STCOL[st];const size=tsize(t);const pos=local[t.id]||{x:t.x,y:t.y};const selected=sel===t.id;
+    {tables.map((t)=>{const o=open[t.id];const st=tableStatus(o);const busy=st!=="free";const sc=STCOL[st];const size=Math.round(tsize(t)*scale);const pos=local[t.id]||{x:t.x,y:t.y};const selected=sel===t.id;const big=size>58;
       return(<div key={t.id} className={(st==="new"&&!arrange)?"pulse":""} onPointerDown={(e)=>down(e,t)} onPointerMove={move} onPointerUp={()=>up(t)} onPointerCancel={()=>up(t)} onClick={()=>{if(!arrange)onPick(t);}}
-        style={{position:"absolute",left:pos.x+"%",top:pos.y+"%",transform:"translate(-50%,-50%)",width:size,height:size,borderRadius:t.shape==="round"?"50%":14,background:busy?C.panel2:C.panel,border:`2px solid ${selected?C.violet:sc}`,display:"grid",placeItems:"center",cursor:arrange?"grab":"pointer",userSelect:"none",boxShadow:selected?`0 0 0 4px rgba(201,143,232,.25)`:st==="prep"?`0 0 0 4px ${C.blueDim}`:st==="served"?`0 0 0 4px ${C.greenDim}`:"none",touchAction:arrange?"none":"auto"}}>
-        <div style={{fontWeight:800,fontSize:size>70?15:13,lineHeight:1}}>{t.name}</div>
-        {busy?<React.Fragment><div style={{fontFamily:MONO,fontSize:12,color:sc,marginTop:2}}>{euro(orderTotal(o))}</div><div style={{fontSize:8.5,color:C.mute,textTransform:"uppercase",letterSpacing:.5,marginTop:1}}>{STLABEL[st]}</div></React.Fragment>:<div style={{fontSize:10.5,color:C.subtle,marginTop:3}}>{t.seats}p</div>}
-        {busy&&!arrange&&<div style={{position:"absolute",top:-6,right:-6,background:sc,color:C.ink,fontSize:10,fontWeight:800,borderRadius:10,padding:"1px 5px",fontFamily:MONO}}>{relTime(o.openedAt,now)}</div>}
+        style={{position:"absolute",left:pos.x+"%",top:pos.y+"%",transform:"translate(-50%,-50%)",width:size,height:size,borderRadius:t.shape==="round"?"50%":Math.round(14*scale),background:busy?C.panel2:C.panel,border:`2px solid ${selected?C.violet:sc}`,display:"grid",placeItems:"center",cursor:arrange?"grab":"pointer",userSelect:"none",boxShadow:selected?`0 0 0 4px rgba(201,143,232,.25)`:st==="prep"?`0 0 0 3px ${C.blueDim}`:st==="served"?`0 0 0 3px ${C.greenDim}`:"none",touchAction:arrange?"none":"auto",overflow:"hidden"}}>
+        <div style={{fontWeight:800,fontSize:big?14:11,lineHeight:1}}>{t.name}</div>
+        {busy?<React.Fragment><div style={{fontFamily:MONO,fontSize:big?11.5:9.5,color:sc,marginTop:2}}>{euro(orderTotal(o))}</div>{big&&<div style={{fontSize:8,color:C.mute,textTransform:"uppercase",letterSpacing:.5,marginTop:1}}>{STLABEL[st]}</div>}</React.Fragment>:<div style={{fontSize:big?10:8.5,color:C.subtle,marginTop:2}}>{t.seats}p</div>}
+        {busy&&!arrange&&big&&<div style={{position:"absolute",top:-6,right:-6,background:sc,color:C.ink,fontSize:9.5,fontWeight:800,borderRadius:10,padding:"1px 5px",fontFamily:MONO}}>{relTime(o.openedAt,now)}</div>}
+        {busy&&o.openedBy&&(big?<div title={wLabel(o.openedBy)} style={{position:"absolute",bottom:-6,left:-6,width:18,height:18,borderRadius:18,background:wColor(o.openedBy),color:C.ink,fontSize:10,fontWeight:800,display:"grid",placeItems:"center",border:`2px solid ${C.ink}`}}>{(wLabel(o.openedBy)[0]||"").toUpperCase()}</div>:<div title={wLabel(o.openedBy)} style={{position:"absolute",bottom:-4,left:-4,width:12,height:12,borderRadius:12,background:wColor(o.openedBy),border:`2px solid ${C.ink}`}}/>)}
       </div>);})}
   </div>);
 }
@@ -212,12 +227,12 @@ function TableEditor({t,onClose}){
   return(<div style={{marginTop:12,background:C.panel,border:`1px solid ${C.violet}`,borderRadius:14,padding:14,display:"grid",gap:12}}>
     <div className="flex ac jb"><span style={{fontWeight:800}}>Edit {t.name}</span><button className="btn" onClick={onClose} style={{...ICON,cursor:"pointer"}}><Ico n="x" size={16} color={C.mute}/></button></div>
     <div className="flex ac wrap" style={{gap:16}}>
-      <label style={LBL}>Name</label><input value={t.name} onChange={(e)=>set({name:e.target.value})} style={{...INP,width:110}}/>
-      <label style={LBL}>Seats</label><div className="flex ac" style={{gap:8}}><button className="btn" onClick={()=>set({seats:Math.max(1,t.seats-1)})} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button><span style={{fontFamily:MONO,width:18,textAlign:"center",fontWeight:700}}>{t.seats}</span><button className="btn" onClick={()=>set({seats:t.seats+1})} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></div>
+      <div className="flex ac" style={{gap:8}}><span style={LBL}>Name</span><input value={t.name} onChange={(e)=>set({name:e.target.value})} style={{...INP,width:100}}/></div>
+      <div className="flex ac" style={{gap:8}}><span style={LBL}>Seats</span><button className="btn" onClick={()=>set({seats:Math.max(1,t.seats-1)})} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button><span style={{fontFamily:MONO,width:18,textAlign:"center",fontWeight:700}}>{t.seats}</span><button className="btn" onClick={()=>set({seats:t.seats+1})} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></div>
     </div>
     <div className="flex ac wrap" style={{gap:16}}>
       <div><div style={LBL}>Shape</div><div className="flex" style={{gap:6}}>{[["square","Square"],["round","Round"]].map(([v,l])=>(<button key={v} className="btn" onClick={()=>set({shape:v})} style={{...CHIP,background:t.shape===v?C.amber:C.panel3,color:t.shape===v?C.ink:C.text}}>{l}</button>))}</div></div>
-      <div><div style={LBL}>Size</div><div className="flex" style={{gap:6}}>{[["s","Small"],["m","Medium"],["l","Large"]].map(([v,l])=>(<button key={v} className="btn" onClick={()=>set({size:v})} style={{...CHIP,background:t.size===v?C.amber:C.panel3,color:t.size===v?C.ink:C.text}}>{l}</button>))}</div></div>
+      <div><div style={LBL}>Size</div><div className="flex" style={{gap:6}}>{[["s","Small"],["m","Medium"],["l","Large"]].map(([v,l])=>(<button key={v} className="btn" onClick={()=>set({size:v})} style={{...CHIP,background:(t.size||"m")===v?C.amber:C.panel3,color:(t.size||"m")===v?C.ink:C.text}}>{l}</button>))}</div></div>
     </div>
     <button className="btn" onClick={()=>{if(confirm("Delete "+t.name+"?")){act("deleteTable",{id:t.id});onClose();}}} style={{...BIG,justifyContent:"center",background:"transparent",border:`1px solid ${C.red}`,color:C.red,cursor:"pointer"}}><Ico n="trash" size={15}/> Delete table</button>
   </div>);
@@ -226,112 +241,137 @@ function TableEditor({t,onClose}){
 /* ---------- all orders ---------- */
 function Orders({open,tables,floors,now,onPick}){
   const list=Object.entries(open).map(([tid,o])=>{const t=tables.find((x)=>x.id===tid);const f=floors.find((x)=>x.id===(t&&t.floorId));return{tid,t,floor:f&&f.name,o};}).filter((r)=>r.o.items.length).sort((a,b)=>new Date(a.o.openedAt)-new Date(b.o.openedAt));
-  return(<div><Title>All open orders</Title><P>Every table in service — all items together, with running totals. Tap to edit.</P>
-    {list.length===0?<Empty>No tables are open right now.</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))"}}>
+  return(<div><Title>All open orders</Title><P>Every table in service — all items together. Tap to edit.</P>
+    {list.length===0?<Empty>No tables are open right now.</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))"}}>
       {list.map((r)=>{const total=orderTotal(r.o);const paid=paidSum(r.o);const st=tableStatus(r.o);return(
         <button key={r.tid} className="btn" onClick={()=>onPick(r.t)} style={{textAlign:"left",background:C.panel,border:`1px solid ${C.line}`,borderTop:`3px solid ${STCOL[st]}`,borderRadius:14,padding:14,color:C.text,cursor:"pointer"}}>
           <div className="flex ac jb"><span style={{fontWeight:800,fontSize:17}}>{r.t.name}</span><span className="flex ac" style={{gap:4,fontSize:11,color:C.mute,fontFamily:MONO}}><Ico n="clock" size={11}/> {relTime(r.o.openedAt,now)}</span></div>
-          <div className="flex ac" style={{gap:8,marginTop:2}}><span style={{fontSize:11,color:C.subtle}}>{r.floor}</span><span style={{fontSize:10,fontWeight:700,color:STCOL[st],textTransform:"uppercase"}}>· {STLABEL[st]}</span></div>
+          <div className="flex ac wrap" style={{gap:8,marginTop:2}}><span style={{fontSize:11,color:C.subtle}}>{r.floor}</span><span style={{fontSize:10,fontWeight:700,color:STCOL[st],textTransform:"uppercase"}}>· {STLABEL[st]}</span>{r.o.openedBy&&<span className="flex ac" style={{gap:4,fontSize:11,color:C.text,fontWeight:600}}><span style={{width:9,height:9,borderRadius:9,background:wColor(r.o.openedBy)}}/>{wLabel(r.o.openedBy)}</span>}</div>
           <div style={{margin:"10px 0",borderTop:`1px solid ${C.line}`}}/>
-          {r.o.items.map((x,i)=>(<div key={i}><div className="flex ac" style={{gap:7,padding:"3px 0",fontSize:13,opacity:x.done?.5:1}}>
-            <Dot pid={x.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span>
-            {!x.sent&&<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}
-            <span style={{fontFamily:MONO,color:C.mute,fontSize:12}}>{euro(x.price*x.qty)}</span></div>{x.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {x.note}</div>}</div>))}
+          {r.o.items.map((x,i)=>(<div key={i}><div className="flex ac" style={{gap:7,padding:"3px 0",fontSize:13,opacity:x.done?.5:1}}><Dot pid={x.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span>{!x.sent&&<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}<span style={{fontFamily:MONO,color:C.mute,fontSize:12}}>{euro(x.price*x.qty)}</span></div>{x.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {x.note}</div>}</div>))}
           <div className="flex ac" style={{margin:"10px 0 0",borderTop:`1px dashed ${C.line}`,paddingTop:8}}><span style={{flex:1,fontSize:12,color:C.mute}}>{paid>0?`Paid ${euro(paid)} · left`:"Total"}</span><span style={{fontFamily:MONO,fontSize:18,fontWeight:800,color:C.amber}}>{euro(total-paid)}</span></div>
         </button>);})}
     </div>)}
   </div>);
 }
 
-/* ---------- prep display (one per printer) ---------- */
-function Prep({printer,open,tables,floors,now}){
+/* ---------- prep display + undo ---------- */
+function Prep({printer,receiptId,open,tables,floors,now}){
+  const match=(x)=>printer.all?(x.printerId&&x.printerId!==receiptId):x.printerId===printer.id;
   const tickets=Object.entries(open).map(([tid,o])=>{const t=tables.find((x)=>x.id===tid);const f=floors.find((x)=>x.id===(t&&t.floorId));
-    return{tid,name:t&&t.name,floor:f&&f.name,openedAt:o.openedAt,items:o.items.filter((x)=>x.printerId===printer.id&&x.sent&&!x.done)};}).filter((t)=>t.items.length).sort((a,b)=>new Date(a.openedAt)-new Date(b.openedAt));
+    return{tid,name:t&&t.name,floor:f&&f.name,openedAt:o.openedAt,openedBy:o.openedBy,items:o.items.filter((x)=>match(x)&&x.sent&&!x.done)};}).filter((t)=>t.items.length).sort((a,b)=>new Date(a.openedAt)-new Date(b.openedAt));
+  const recent=[];Object.entries(open).forEach(([tid,o])=>{const t=tables.find((x)=>x.id===tid);(o.items||[]).forEach((x)=>{if(match(x)&&x.sent&&x.done&&x.doneAt)recent.push({...x,table:t&&t.name,tid});});});
+  recent.sort((a,b)=>new Date(b.doneAt)-new Date(a.doneAt));
+  const recentShown=recent.filter((x)=>Date.now()-new Date(x.doneAt).getTime()<45*60000).slice(0,12);
   return(<div>
-    <div className="flex ac" style={{gap:8}}><span style={{width:12,height:12,borderRadius:12,background:printer.color}}/><Title>{printer.name} display</Title></div>
-    <P>Items routed to this printer. Tap an item once it's delivered — when a ticket is fully delivered it leaves this screen and stays only in All orders.</P>
-    {tickets.length===0?<Empty>Nothing waiting at {printer.name}.</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))"}}>
+    <div className="flex ac" style={{gap:8}}><span style={{width:12,height:12,borderRadius:12,background:printer.color}}/><Title>{printer.name} display{printer.all?" · everything":""}</Title></div>
+    <P>Tap an item once delivered — a fully delivered ticket leaves this screen and stays only in All orders. Made a mistake? Undo it below.</P>
+    {tickets.length===0?<Empty>Nothing waiting at {printer.name}.</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))"}}>
       {tickets.map((t)=>(<div key={t.tid} className="pop" style={{background:C.paper,borderRadius:12,padding:14,color:"#2A231A",fontFamily:MONO,boxShadow:`0 2px 0 ${C.paperLine}`,borderTop:`4px solid ${printer.color}`}}>
-        <div className="flex ac jb" style={{borderBottom:`1.5px dashed ${C.paperLine}`,paddingBottom:8}}><div><div style={{fontWeight:800,fontSize:16,fontFamily:SANS}}>{t.name}</div><div style={{fontSize:10.5}}>{t.floor} · {relTime(t.openedAt,now)}</div></div></div>
-        <div style={{padding:"8px 0"}}>{t.items.map((x)=>(<button key={x.lid} className="btn" onClick={()=>act("setDone",{tableId:t.tid,lid:x.lid,done:true})} style={{width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"5px 0",cursor:"pointer",color:"#2A231A",borderBottom:`1px dotted ${C.paperLine}`}}>
-          <div className="flex ac" style={{gap:8,fontSize:14}}><Ico n="circle" size={16} color="#B08A55"/><span style={{fontWeight:700}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span></div>
-          {x.note&&<div style={{fontSize:12,color:"#8A5A2A",marginLeft:24}}>↳ {x.note}</div>}</button>))}</div>
-        <button className="btn" onClick={()=>act("bumpStation",{tableId:t.tid,printerId:printer.id})} style={{width:"100%",background:"#2A231A",color:C.paper,border:"none",borderRadius:8,padding:"9px 0",fontFamily:SANS,fontWeight:700,cursor:"pointer"}}>Deliver all</button>
+        <div className="flex ac jb" style={{borderBottom:`1.5px dashed ${C.paperLine}`,paddingBottom:8}}><div><div style={{fontWeight:800,fontSize:16,fontFamily:SANS}}>{t.name}</div><div style={{fontSize:10.5}}>{t.floor} · {relTime(t.openedAt,now)}{t.openedBy?" · "+wLabel(t.openedBy):""}</div></div>{t.openedBy&&<span title={wLabel(t.openedBy)} style={{width:18,height:18,borderRadius:18,background:wColor(t.openedBy),display:"grid",placeItems:"center",fontSize:10,fontWeight:800,color:"#241D14"}}>{(wLabel(t.openedBy)[0]||"").toUpperCase()}</span>}</div>
+        <div style={{padding:"6px 0"}}>{t.items.map((x)=>(<button key={x.lid} className="btn" onClick={()=>act("setDone",{tableId:t.tid,lid:x.lid,done:true})} style={{width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"6px 0",cursor:"pointer",color:"#2A231A",borderBottom:`1px dotted ${C.paperLine}`}}>
+          <div className="flex ac" style={{gap:8,fontSize:14}}><Ico n="circle" size={17} color="#B08A55"/><span style={{fontWeight:700}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span></div>
+          {x.note&&<div style={{fontSize:12,color:"#8A5A2A",marginLeft:25}}>↳ {x.note}</div>}</button>))}</div>
+        <button className="btn" onClick={()=>act("bumpStation",{tableId:t.tid,printerId:printer.all?printer.id:printer.id})} style={{width:"100%",background:"#2A231A",color:C.paper,border:"none",borderRadius:8,padding:"9px 0",fontFamily:SANS,fontWeight:700,cursor:"pointer",display:printer.all?"none":"block"}}>Deliver all</button>
       </div>))}
     </div>)}
+    {recentShown.length>0&&<div style={{marginTop:20}}>
+      <div style={{fontSize:12,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:C.mute,marginBottom:8}}>Recently delivered — tap to undo</div>
+      <div className="flex wrap" style={{gap:8}}>{recentShown.map((x)=>(<button key={x.lid} className="btn" onClick={()=>act("setDone",{tableId:x.tid,lid:x.lid,done:false})} style={{display:"flex",alignItems:"center",gap:8,background:C.panel,border:`1px solid ${C.line}`,borderRadius:20,padding:"7px 12px",color:C.text,cursor:"pointer",fontSize:12.5}}>
+        <Ico n="undo" size={13} color={C.blue}/><span style={{color:C.mute,fontFamily:MONO}}>{x.qty}×</span> {x.name} <span style={{color:C.subtle}}>· {x.table}</span></button>))}</div>
+    </div>}
   </div>);
 }
 
-/* ---------- order screen ---------- */
-function OrderScreen({table,order,menu,wname,onAdd,onQty,onRemove,onNote,onClose,onPlace,onBill,onPay}){
-  const [cat,setCat]=useState("All");const [noteIdx,setNoteIdx]=useState(-1);const [noteVal,setNoteVal]=useState("");
+/* ---------- order screen (mobile-correct) ---------- */
+function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onClose,onPlace,onBill,onPay}){
+  const [cat,setCat]=useState("All");const [noteIdx,setNoteIdx]=useState(-1);const [noteVal,setNoteVal]=useState("");const [pane,setPane]=useState("menu");
   const cats=useMemo(()=>["All",...Array.from(new Set(menu.map((m)=>m.cat)))],[menu]);
   const shown=cat==="All"?menu:menu.filter((m)=>m.cat===cat);
   const items=(order&&order.items)||[];const total=orderTotal(order);const paid=paidSum(order);
-  const unsent=items.filter((x)=>!x.sent).length;const counts={};items.forEach((x)=>{if(!x.sent)counts[x.id]=(counts[x.id]||0)+x.qty;});
+  const unsent=items.filter((x)=>!x.sent).length;const nItems=items.reduce((s,x)=>s+x.qty,0);
+  const counts={};items.forEach((x)=>{if(!x.sent)counts[x.id]=(counts[x.id]||0)+x.qty;});
   const openNote=(i)=>{setNoteIdx(i);setNoteVal(items[i].note||"");};const saveNote=()=>{onNote(noteIdx,noteVal);setNoteIdx(-1);};
+  const showMenu=!mob||pane==="menu";const showOrder=!mob||pane==="order";
+  const MenuPane=(<div style={{flex:1,minWidth:0,overflowY:"auto",borderRight:mob?"none":`1px solid ${C.line}`,padding:12}}>
+    <div className="flex wrap" style={{gap:6,marginBottom:12}}>{cats.map((c)=>{const cc=c==="All"?C.amber:catColor(c);const on=cat===c;return(<button key={c} onClick={()=>setCat(c)} style={{padding:"6px 12px",borderRadius:20,fontSize:12.5,cursor:"pointer",border:`1px solid ${on?cc:C.line}`,background:on?cc:"transparent",color:on?C.ink:C.mute,fontWeight:on?700:500}}>{c}</button>);})}</div>
+    <div style={{display:"grid",gap:8,gridTemplateColumns:`repeat(auto-fill,minmax(${mob?104:118}px,1fr))`}}>{shown.map((m)=>{const n=counts[m.id]||0;return(<button key={m.id} className="tile" onClick={()=>onAdd(m)} style={{position:"relative",textAlign:"left",background:C.panel,borderRadius:10,border:`1px solid ${C.line}`,borderTop:`3px solid ${catColor(m.cat)}`,padding:"10px 11px",color:C.text,cursor:"pointer"}}>
+      <div style={{fontSize:13,fontWeight:600,lineHeight:1.25}}>{m.name}</div><div className="flex ac jb" style={{marginTop:8}}><span style={{fontFamily:MONO,color:C.amber,fontSize:13}}>{euro(m.price)}</span><Dot pid={m.printerId}/></div>
+      {n>0&&<span className="pop" style={{position:"absolute",top:-8,right:-8,minWidth:20,height:20,padding:"0 5px",borderRadius:10,background:C.amber,color:C.ink,fontSize:11,fontWeight:800,fontFamily:MONO,display:"grid",placeItems:"center"}}>{n}</span>}</button>);})}</div>
+  </div>);
+  const OrderPane=(<div style={{flex:1,minWidth:0,overflowY:"auto",padding:12}}>
+    {items.length===0?<div style={{color:C.subtle,fontSize:13,padding:"30px 8px"}}>No items yet. Tap products — drinks and food — then send the order.</div>:
+      items.map((x,i)=>(<div key={i} style={{borderBottom:`1px solid ${C.line}`,padding:"9px 0",opacity:x.done?.55:1}}>
+        <div className="flex ac" style={{gap:8}}><Dot pid={x.printerId}/>
+          <div style={{flex:1,minWidth:0}}><div className="flex ac" style={{gap:6}}><span style={{fontSize:13.5,fontWeight:600}}>{x.name}</span>
+            {x.sent?<span style={{fontSize:9,fontWeight:800,color:x.done?C.green:C.blue,border:`1px solid ${x.done?C.greenDim:C.blueDim}`,borderRadius:4,padding:"0 4px"}}>{x.done?"DONE":"SENT"}</span>:<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}</div>
+            <div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{euro(x.price)} · {wname(x.waiterId)}</div></div>
+          <button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button>
+          <span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span>
+          <button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button>
+          <button className="btn" onClick={()=>openNote(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="note" size={13} color={x.note?C.blue:C.mute}/></button>
+          <button className="btn" onClick={()=>onRemove(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>
+        {noteIdx===i?(<div className="flex ac" style={{gap:6,marginTop:6,marginLeft:16}}><input autoFocus value={noteVal} onChange={(e)=>setNoteVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveNote();}} placeholder="e.g. no onions…" style={{...INP,flex:1,fontSize:12}}/><button className="btn" onClick={saveNote} style={{...QTY,width:32,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></div>):x.note?<div style={{fontSize:11.5,color:C.blue,marginLeft:16,marginTop:2}}>↳ {x.note}</div>:null}
+      </div>))}
+  </div>);
   return(<Overlay><div style={{display:"flex",flexDirection:"column",height:"100%",background:C.ink}}>
     <div className="flex ac" style={{gap:12,padding:14,borderBottom:`1px solid ${C.line}`,background:C.panel}}>
       <button className="btn" onClick={onClose} style={{...ICON,cursor:"pointer"}}><Ico n="back" size={20}/></button>
-      <div style={{flex:1}}><div style={{fontWeight:800,fontSize:18}}>{table.name}</div><div style={{fontSize:11.5,color:C.mute}}>{table.seats} seats</div></div>
+      <div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:18}}>{table.name}</div><div className="flex ac" style={{gap:6,fontSize:11.5,color:C.mute}}>{table.seats} seats{order&&order.openedBy&&<React.Fragment>· <span style={{width:8,height:8,borderRadius:8,background:wColor(order.openedBy),display:"inline-block"}}/>{wLabel(order.openedBy)}</React.Fragment>}</div></div>
       <div style={{textAlign:"right"}}><div style={{fontFamily:MONO,fontSize:24,fontWeight:700,color:C.amber}}>{euro(total)}</div>{paid>0&&<div style={{fontSize:11,color:C.green,fontFamily:MONO}}>{euro(paid)} paid · {euro(total-paid)} left</div>}</div>
     </div>
-    <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr 1fr",overflow:"hidden"}}>
-      <div style={{overflowY:"auto",borderRight:`1px solid ${C.line}`,padding:12}}>
-        <div className="flex wrap" style={{gap:6,marginBottom:12}}>{cats.map((c)=>{const cc=c==="All"?C.amber:catColor(c);const on=cat===c;return(<button key={c} onClick={()=>setCat(c)} style={{padding:"6px 12px",borderRadius:20,fontSize:12.5,cursor:"pointer",border:`1px solid ${on?cc:C.line}`,background:on?cc:"transparent",color:on?C.ink:C.mute,fontWeight:on?700:500}}>{c}</button>);})}</div>
-        <div style={{display:"grid",gap:8,gridTemplateColumns:"repeat(auto-fill,minmax(118px,1fr))"}}>{shown.map((m)=>{const n=counts[m.id]||0;return(<button key={m.id} className="tile" onClick={()=>onAdd(m)} style={{position:"relative",textAlign:"left",background:C.panel,borderRadius:10,border:`1px solid ${C.line}`,borderTop:`3px solid ${catColor(m.cat)}`,padding:"10px 11px",color:C.text,cursor:"pointer"}}>
-          <div style={{fontSize:13,fontWeight:600,lineHeight:1.25}}>{m.name}</div>
-          <div className="flex ac jb" style={{marginTop:8}}><span style={{fontFamily:MONO,color:C.amber,fontSize:13}}>{euro(m.price)}</span><Dot pid={m.printerId}/></div>
-          {n>0&&<span className="pop" style={{position:"absolute",top:-8,right:-8,minWidth:20,height:20,padding:"0 5px",borderRadius:10,background:C.amber,color:C.ink,fontSize:11,fontWeight:800,fontFamily:MONO,display:"grid",placeItems:"center"}}>{n}</span>}
-        </button>);})}</div>
-      </div>
-      <div style={{display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        <div style={{flex:1,overflowY:"auto",padding:12}}>
-          {items.length===0?<div style={{color:C.subtle,fontSize:13,padding:"30px 8px"}}>No items yet. Tap products — drinks and food — then send the order.</div>:
-            items.map((x,i)=>(<div key={i} style={{borderBottom:`1px solid ${C.line}`,padding:"9px 0",opacity:x.done?.55:1}}>
-              <div className="flex ac" style={{gap:8}}><Dot pid={x.printerId}/>
-                <div style={{flex:1}}><div className="flex ac" style={{gap:6}}><span style={{fontSize:13.5,fontWeight:600}}>{x.name}</span>
-                  {x.sent?<span style={{fontSize:9,fontWeight:800,color:x.done?C.green:C.blue,border:`1px solid ${x.done?C.greenDim:C.blueDim}`,borderRadius:4,padding:"0 4px"}}>{x.done?"DONE":"SENT"}</span>:<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}</div>
-                  <div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{euro(x.price)} · {wname(x.waiterId)}</div></div>
-                <button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button>
-                <span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span>
-                <button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button>
-                <span style={{fontFamily:MONO,width:52,textAlign:"right",color:C.amber,fontSize:13}}>{euro(x.price*x.qty)}</span>
-                <button className="btn" onClick={()=>openNote(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="note" size={13} color={x.note?C.blue:C.mute}/></button>
-                <button className="btn" onClick={()=>onRemove(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>
-              {noteIdx===i?(<div className="flex ac" style={{gap:6,marginTop:6,marginLeft:16}}><input autoFocus value={noteVal} onChange={(e)=>setNoteVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveNote();}} placeholder="e.g. no onions, extra hot…" style={{...INP,flex:1,fontSize:12}}/><button className="btn" onClick={saveNote} style={{...QTY,width:32,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></div>):x.note?<div style={{fontSize:11.5,color:C.blue,marginLeft:16,marginTop:2}}>↳ {x.note}</div>:null}
-            </div>))}
-        </div>
-        <div style={{padding:12,borderTop:`1px solid ${C.line}`,background:C.panel,display:"grid",gap:8}}>
-          <button className="btn" onClick={onPlace} disabled={!unsent} style={{...BIG,justifyContent:"center",gap:8,color:C.ink,fontWeight:800,border:"none",cursor:unsent?"pointer":"default",background:unsent?`linear-gradient(135deg,${C.amber},#D98A2E)`:C.panel2,opacity:unsent?1:.5}}><Ico n="send" size={16} color={unsent?C.ink:C.subtle}/> {unsent?`Send order · ${unsent} new`:"All items sent ✓"}</button>
-          <div className="flex" style={{gap:8}}>
-            <button className="btn" onClick={onBill} disabled={!items.length} style={{...BIG,flex:1,justifyContent:"center",gap:8,background:C.panel3,border:`1px solid ${C.line}`,color:C.text,cursor:"pointer",opacity:items.length?1:.4}}><Ico n="printer" size={16}/> Bill</button>
-            <button className="btn" onClick={onPay} disabled={!items.length} style={{...BIG,flex:1,justifyContent:"center",gap:8,background:C.green,border:"none",color:C.ink,fontWeight:800,cursor:"pointer",opacity:items.length?1:.4}}><Ico n="check" size={16}/> Pay</button>
-          </div>
-        </div>
+    {mob&&<div className="flex" style={{padding:"8px 12px 0",gap:8}}>
+      {[["menu","Menu"],["order","Order"+(nItems?` · ${nItems}`:"")]].map(([id,l])=>(<button key={id} onClick={()=>setPane(id)} style={{flex:1,padding:"9px 0",borderRadius:9,border:`1px solid ${pane===id?C.amber:C.line}`,background:pane===id?C.amber:C.panel3,color:pane===id?C.ink:C.text,fontWeight:700,fontSize:13,cursor:"pointer"}}>{l}</button>))}</div>}
+    <div style={{flex:1,display:"flex",minHeight:0}}>{showMenu&&MenuPane}{showOrder&&OrderPane}</div>
+    <div style={{padding:12,borderTop:`1px solid ${C.line}`,background:C.panel,display:"grid",gap:8}}>
+      <button className="btn" onClick={onPlace} disabled={!unsent} style={{...BIG,justifyContent:"center",gap:8,color:C.ink,fontWeight:800,border:"none",cursor:unsent?"pointer":"default",background:unsent?`linear-gradient(135deg,${C.amber},#D98A2E)`:C.panel2,opacity:unsent?1:.5}}><Ico n="send" size={16} color={unsent?C.ink:C.subtle}/> {unsent?`Send order · ${unsent} new`:"All items sent ✓"}</button>
+      <div className="flex" style={{gap:8}}>
+        <button className="btn" onClick={onBill} disabled={!items.length} style={{...BIG,flex:1,justifyContent:"center",gap:8,background:C.panel3,border:`1px solid ${C.line}`,color:C.text,cursor:"pointer",opacity:items.length?1:.4}}><Ico n="printer" size={16}/> Bill</button>
+        <button className="btn" onClick={onPay} disabled={!items.length} style={{...BIG,flex:1,justifyContent:"center",gap:8,background:C.green,border:"none",color:C.ink,fontWeight:800,cursor:"pointer",opacity:items.length?1:.4}}><Ico n="check" size={16}/> Pay</button>
       </div>
     </div>
   </div></Overlay>);
 }
 
-/* ---------- split pay ---------- */
-function PayModal({name,order,onAdd,onCancel}){
+/* ---------- split pay (by amount OR by item) ---------- */
+function PayModal({name,order,mob,onAdd,onCancel}){
   const total=orderTotal(order);const paid=paidSum(order);const remaining=round2(total-paid);
-  const [amount,setAmount]=useState(remaining.toFixed(2));const [method,setMethod]=useState("cash");
-  useEffect(()=>{setAmount(remaining.toFixed(2));},[remaining]);const payments=order.payments||[];
-  const add=()=>{const a=parseFloat(amount);if(!a||a<=0)return;onAdd(round2(a),method);};
-  return(<Overlay center onBackdrop={onCancel}><div style={{background:C.panel,borderRadius:16,padding:20,width:340,border:`1px solid ${C.line}`,maxHeight:"90vh",overflowY:"auto"}}>
+  const paidMap=paidQtyMap(order);
+  const [mode,setMode]=useState("amount");const [amount,setAmount]=useState(remaining.toFixed(2));const [method,setMethod]=useState("cash");const [sel,setSel]=useState({});
+  useEffect(()=>{setAmount(remaining.toFixed(2));},[remaining]);
+  const payments=order.payments||[];
+  const lines=(order.items||[]).map((x)=>({...x,unpaid:x.qty-(paidMap[x.lid]||0)})).filter((x)=>x.unpaid>0);
+  const selAmount=round2(lines.reduce((s,x)=>s+(sel[x.lid]||0)*x.price,0));
+  const bump=(lid,d,max)=>setSel((s)=>{const v=Math.max(0,Math.min(max,(s[lid]||0)+d));return {...s,[lid]:v};});
+  const payAmount=()=>{const a=parseFloat(amount);if(!a||a<=0)return;onAdd(round2(a),method);};
+  const payItems=()=>{if(selAmount<=0)return;const l=Object.entries(sel).filter(([,q])=>q>0).map(([lid,qty])=>({lid,qty}));onAdd(selAmount,method,l);setSel({});};
+  return(<Overlay center onBackdrop={onCancel}><div style={{background:C.panel,borderRadius:16,padding:18,width:mob?"100%":360,maxWidth:420,border:`1px solid ${C.line}`,maxHeight:"92vh",overflowY:"auto"}}>
     <div className="flex ac jb"><span style={{fontWeight:800,fontSize:16}}>Pay · {name}</span><button className="btn" onClick={onCancel} style={{...ICON,cursor:"pointer"}}><Ico n="x" size={18} color={C.mute}/></button></div>
-    <div className="flex ac jb" style={{margin:"14px 0 4px"}}><span style={{color:C.mute,fontSize:12.5}}>Remaining</span><span style={{fontFamily:MONO,fontSize:32,fontWeight:800,color:C.amber}}>{euro(remaining)}</span></div>
-    <div style={{fontSize:11.5,color:C.subtle}}>Total {euro(total)}{paid>0?` · already paid ${euro(paid)}`:""}</div>
-    {payments.length>0&&<div style={{margin:"10px 0",background:C.panel2,borderRadius:10,padding:"8px 10px"}}>{payments.map((p,i)=>(<div key={i} className="flex ac jb" style={{fontSize:12.5,padding:"2px 0"}}><span className="flex ac" style={{gap:6}}><Ico n={p.method==="card"?"card":"cash"} size={13} color={C.mute}/> {p.method==="card"?"Card/POS":"Cash"}</span><span style={{fontFamily:MONO}}>{euro(p.amount)}</span></div>))}</div>}
-    <div style={{color:C.mute,fontSize:12,margin:"14px 0 6px"}}>Split this bill</div>
-    <div className="flex" style={{gap:6,marginBottom:12}}>{[["Full",1],["½",2],["⅓",3],["¼",4]].map(([lbl,n])=>(<button key={lbl} className="btn" onClick={()=>setAmount((remaining/n).toFixed(2))} style={{flex:1,padding:"9px 0",borderRadius:9,border:`1px solid ${C.line}`,background:C.panel3,color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>{lbl}</button>))}</div>
-    <div className="flex ac" style={{gap:8,marginBottom:12}}><span style={{fontFamily:MONO,color:C.mute}}>€</span><input type="number" inputMode="decimal" value={amount} onChange={(e)=>setAmount(e.target.value)} style={{...INP,flex:1,fontFamily:MONO,fontSize:18}}/></div>
+    <div className="flex ac jb" style={{margin:"12px 0 2px"}}><span style={{color:C.mute,fontSize:12.5}}>Remaining</span><span style={{fontFamily:MONO,fontSize:30,fontWeight:800,color:C.amber}}>{euro(remaining)}</span></div>
+    <div style={{fontSize:11.5,color:C.subtle}}>Total {euro(total)}{paid>0?` · paid ${euro(paid)}`:""}</div>
+    {payments.length>0&&<div style={{margin:"10px 0",background:C.panel2,borderRadius:10,padding:"8px 10px"}}>{payments.map((p,i)=>(<div key={i} className="flex ac jb" style={{fontSize:12.5,padding:"2px 0"}}><span className="flex ac" style={{gap:6}}><Ico n={p.method==="card"?"card":"cash"} size={13} color={C.mute}/> {p.method==="card"?"Card/POS":"Cash"}{p.lines?" · items":""}</span><span style={{fontFamily:MONO}}>{euro(p.amount)}</span></div>))}</div>}
+
+    <div className="flex" style={{gap:6,margin:"12px 0"}}>{[["amount","Whole / split evenly"],["item","Pick items"]].map(([id,l])=>(<button key={id} className="btn" onClick={()=>setMode(id)} style={{flex:1,padding:"9px 0",borderRadius:9,border:`1px solid ${mode===id?C.amber:C.line}`,background:mode===id?C.amber:C.panel3,color:mode===id?C.ink:C.text,fontWeight:700,fontSize:12.5,cursor:"pointer"}}>{l}</button>))}</div>
+
+    {mode==="amount"?(<React.Fragment>
+      <div className="flex" style={{gap:6,marginBottom:12}}>{[["Full",1],["½",2],["⅓",3],["¼",4]].map(([lbl,n])=>(<button key={lbl} className="btn" onClick={()=>setAmount((remaining/n).toFixed(2))} style={{flex:1,padding:"9px 0",borderRadius:9,border:`1px solid ${C.line}`,background:C.panel3,color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>{lbl}</button>))}</div>
+      <div className="flex ac" style={{gap:8,marginBottom:14}}><span style={{fontFamily:MONO,color:C.mute}}>€</span><input type="number" inputMode="decimal" value={amount} onChange={(e)=>setAmount(e.target.value)} style={{...INP,flex:1,fontFamily:MONO,fontSize:18}}/></div>
+    </React.Fragment>):(<React.Fragment>
+      <div style={{fontSize:11.5,color:C.mute,marginBottom:8}}>Choose the items this person is paying for.</div>
+      <div style={{display:"grid",gap:6,marginBottom:10}}>{lines.length===0?<div style={{fontSize:12.5,color:C.subtle}}>Everything is already covered.</div>:lines.map((x)=>{const q=sel[x.lid]||0;return(<div key={x.lid} className="flex ac" style={{gap:8,background:q>0?C.panel3:C.panel2,border:`1px solid ${q>0?C.amber:C.line}`,borderRadius:10,padding:"8px 10px"}}>
+        <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600}}>{x.name}</div><div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{euro(x.price)} · {x.unpaid} left</div></div>
+        <button className="btn" onClick={()=>bump(x.lid,-1,x.unpaid)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button>
+        <span style={{fontFamily:MONO,width:18,textAlign:"center",fontWeight:700}}>{q}</span>
+        <button className="btn" onClick={()=>bump(x.lid,1,x.unpaid)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></div>);})}</div>
+      <div className="flex ac jb" style={{marginBottom:12,fontSize:13}}><span style={{color:C.mute}}>Selected</span><span style={{fontFamily:MONO,fontWeight:800,color:C.amber,fontSize:18}}>{euro(selAmount)}</span></div>
+    </React.Fragment>)}
+
     <div className="flex" style={{gap:8,marginBottom:14}}>
       <button className="btn" onClick={()=>setMethod("cash")} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"12px 0",borderRadius:10,border:`1px solid ${method==="cash"?C.green:C.line}`,background:method==="cash"?"rgba(123,196,154,.12)":C.panel3,color:C.text,fontWeight:700,cursor:"pointer"}}><Ico n="cash" size={18} color={C.green}/> Cash</button>
       <button className="btn" onClick={()=>setMethod("card")} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"12px 0",borderRadius:10,border:`1px solid ${method==="card"?C.amber:C.line}`,background:method==="card"?"rgba(232,162,61,.12)":C.panel3,color:C.text,fontWeight:700,cursor:"pointer"}}><Ico n="card" size={18} color={C.amber}/> Card / POS</button></div>
-    <button className="btn" onClick={add} style={{...BIG,width:"100%",justifyContent:"center",background:C.amber,border:"none",color:C.ink,fontWeight:800,cursor:"pointer"}}>{parseFloat(amount)>=remaining?"Take payment & close":"Take part payment"}</button>
+    {mode==="amount"?
+      <button className="btn" onClick={payAmount} style={{...BIG,width:"100%",justifyContent:"center",background:C.amber,border:"none",color:C.ink,fontWeight:800,cursor:"pointer"}}>{parseFloat(amount)>=remaining?"Take payment & close":"Take part payment"}</button>:
+      <button className="btn" onClick={payItems} disabled={selAmount<=0} style={{...BIG,width:"100%",justifyContent:"center",background:C.amber,border:"none",color:C.ink,fontWeight:800,cursor:"pointer",opacity:selAmount>0?1:.4}}>Pay selected · {euro(selAmount)}</button>}
     <div style={{fontSize:11,color:C.subtle,textAlign:"center",marginTop:8}}>Add several payments for a split bill; the table closes when the balance reaches zero.</div>
   </div></Overlay>);
 }
@@ -348,7 +388,6 @@ function Receipt({data,onClose}){
       <div style={{borderTop:`1px dashed ${C.paperLine}`,margin:"8px 0"}}/>
       {items.map((x,i)=>(<div key={i}><div className="flex jb" style={{padding:"2px 0"}}><span>{x.qty}× {x.name}</span>{priced&&<span>{euro(x.price*x.qty)}</span>}</div>{x.note&&<div style={{fontSize:11,color:"#8A5A2A"}}>↳ {x.note}</div>}</div>))}
       {priced&&<React.Fragment><div style={{borderTop:`2px dashed ${C.paperLine}`,margin:"8px 0"}}/><div className="flex jb" style={{fontWeight:800,fontSize:15}}><span style={{fontFamily:SANS}}>TOTAL</span><span>{euro(total)}</span></div>{payments.map((p,i)=>(<div key={i} className="flex jb" style={{fontSize:12}}><span>{p.method==="card"?"Card/POS":"Cash"}</span><span>{euro(p.amount)}</span></div>))}{method==="split"&&<div style={{textAlign:"center",marginTop:8,fontSize:12,letterSpacing:1}}>· SPLIT BILL ·</div>}</React.Fragment>}
-      {!priced&&!items.length&&<div style={{fontSize:12,color:"#7A6B55"}}>Nothing new to send.</div>}
       <div style={{textAlign:"center",marginTop:12,fontSize:20}}>* * *</div>
     </div>
     {status&&status.t&&<div style={{fontSize:11.5,color:status.c,margin:"10px 2px",textAlign:"center"}}>{status.t}</div>}
@@ -371,7 +410,7 @@ function Reports({sales,waiters}){
   const cells=[];for(let i=0;i<startDow;i++)cells.push(null);for(let d=1;d<=days;d++)cells.push(d);
   const shift=(dir)=>setMonth((p)=>{let m=p.m+dir,y=p.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}return{y,m};});
   return(<div><Title>Daily takings</Title>
-    <div style={{display:"grid",gap:16,gridTemplateColumns:"minmax(250px,1fr) minmax(270px,1.1fr)",alignItems:"start",marginTop:12}}>
+    <div style={{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",alignItems:"start",marginTop:12}}>
       <div style={{background:C.panel,borderRadius:14,border:`1px solid ${C.line}`,padding:14}}>
         <div className="flex ac jb" style={{marginBottom:12}}><button className="btn" onClick={()=>shift(-1)} style={{...ICON,cursor:"pointer"}}><Ico n="left" size={18}/></button><span style={{fontWeight:700,fontSize:14}}>{first.toLocaleString("en-US",{month:"long",year:"numeric"})}</span><button className="btn" onClick={()=>shift(1)} style={{...ICON,cursor:"pointer"}}><Ico n="right" size={18}/></button></div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,fontSize:10.5,color:C.subtle,marginBottom:4,fontFamily:MONO}}>{["M","T","W","T","F","S","S"].map((d,i)=><div key={i} style={{textAlign:"center"}}>{d}</div>)}</div>
@@ -391,86 +430,86 @@ const RRow=({l,v})=>(<div className="flex jb" style={{fontSize:13.5,padding:"3px
 const Sub=({children})=>(<div style={{fontFamily:SANS,fontWeight:800,fontSize:12.5,letterSpacing:1,margin:"18px 0 6px",color:"#5A4B38"}}>{children}</div>);
 const Muted=({children})=>(<div style={{fontSize:12.5,color:"#7A6B55"}}>{children}</div>);
 
-/* ---------- setup ---------- */
-function Setup({state}){
+/* ---------- setup (printers last) ---------- */
+function Setup({state,mob}){
   const {menu,tables,floors,printers,waiters,receiptPrinterId}=state;
-  const prepOptions=printers;
   const [pN,setPN]=useState(""),[pP,setPP]=useState(""),[pC,setPC]=useState("Food"),[pPr,setPPr]=useState(printers[0]&&printers[0].id||"");
   const [fN,setFN]=useState("");const [tN,setTN]=useState(""),[tSe,setTSe]=useState("4"),[tF,setTF]=useState(floors[0]&&floors[0].id);
   const [wN,setWN]=useState(""),[wPin,setWPin]=useState(""),[wRole,setWRole]=useState("waiter");
   const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");
-  return(<div style={{display:"grid",gap:20,gridTemplateColumns:"1fr 1fr"}}>
+  return(<div style={{display:"grid",gap:20,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
     <div>
-      <Title>Printers ({printers.length})</Title>
-      <div style={CARD}>
-        {printers.map((p)=>(<div key={p.id} className="flex ac" style={{gap:8,padding:"6px 0",borderBottom:`1px solid ${C.line}`}}>
-          <button className="btn" onClick={()=>act("updatePrinter",{id:p.id,patch:{color:PAL[(PAL.indexOf(p.color)+1)%PAL.length]}})} title="change colour" style={{width:16,height:16,borderRadius:16,background:p.color,border:"none",cursor:"pointer",flexShrink:0}}/>
-          <input value={p.name} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{name:e.target.value}})} style={{...INP,width:88,padding:"6px 8px"}}/>
-          <input value={p.ip} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{ip:e.target.value}})} placeholder="IP address" style={{...INP,flex:1,padding:"6px 8px"}}/>
-          <button className="btn" onClick={()=>act("setReceiptPrinter",{id:p.id})} title="prints the customer bill" style={{...CHIP,padding:"5px 8px",background:receiptPrinterId===p.id?C.green:C.panel3,color:receiptPrinterId===p.id?C.ink:C.mute}}>Bill</button>
-          <button className="btn" onClick={()=>act("deletePrinter",{id:p.id})} style={{...ICON,width:26,height:26,cursor:"pointer"}}><Ico n="trash" size={12} color={C.red}/></button>
-        </div>))}
-        <div className="flex" style={{gap:8,marginTop:8}}><input placeholder="Name (e.g. Grill)" value={prN} onChange={(e)=>setPrN(e.target.value)} style={{...INP,flex:1}}/><input placeholder="IP" value={prIp} onChange={(e)=>setPrIp(e.target.value)} style={{...INP,width:110}}/>
-          <button className="btn" onClick={()=>{if(prN){act("addPrinter",{name:prN,ip:prIp,color:PAL[printers.length%PAL.length]});setPrN("");setPrIp("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/></button></div>
-        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}>“Bill” marks the printer that prints the customer receipt. All others are prep stations and each gets its own tab. Tap the dot to recolour.</div>
-      </div>
-
       <Title>Menu ({menu.length})</Title>
       <div style={{...CARD,display:"grid",gap:8}}>
         <input placeholder="Product name" value={pN} onChange={(e)=>setPN(e.target.value)} style={INP}/>
         <div className="flex" style={{gap:8}}><input placeholder="Price" type="number" value={pP} onChange={(e)=>setPP(e.target.value)} style={{...INP,flex:1}}/><input placeholder="Category" value={pC} onChange={(e)=>setPC(e.target.value)} style={{...INP,flex:1}}/></div>
-        <div className="flex" style={{gap:8}}><select value={pPr} onChange={(e)=>setPPr(e.target.value)} style={{...INP,flex:1}}><option value="">→ No printer</option>{prepOptions.map((p)=><option key={p.id} value={p.id}>→ {p.name}</option>)}</select>
+        <div className="flex" style={{gap:8}}><select value={pPr} onChange={(e)=>setPPr(e.target.value)} style={{...INP,flex:1}}><option value="">→ No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>→ {p.name}</option>)}</select>
           <button className="btn" onClick={()=>{if(pN&&pP){act("addProduct",{name:pN,price:parseFloat(pP),cat:pC,printerId:pPr});setPN("");setPP("");}}} style={{display:"flex",alignItems:"center",gap:6,...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add</button></div>
       </div>
       <div style={{display:"grid",gap:6}}>{menu.map((m)=>(<div key={m.id} className="flex ac" style={{...ROW,borderLeft:`3px solid ${catColor(m.cat)}`}}>
         <span style={{flex:1,fontSize:13}}>{m.name}</span>
-        <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:96}}><option value="">No printer</option>{prepOptions.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <span style={{fontFamily:MONO,color:C.amber,fontSize:13,width:52,textAlign:"right"}}>{euro(m.price)}</span>
+        <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:92}}><option value="">No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <span style={{fontFamily:MONO,color:C.amber,fontSize:13,width:50,textAlign:"right"}}>{euro(m.price)}</span>
         <button className="btn" onClick={()=>act("deleteProduct",{id:m.id})} style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>))}</div>
     </div>
     <div>
       <Title>Users ({waiters.length})</Title>
       <div style={CARD}>
-        <div className="flex" style={{gap:8}}><input placeholder="Name" value={wN} onChange={(e)=>setWN(e.target.value)} style={{...INP,flex:1}}/><input placeholder="PIN" value={wPin} onChange={(e)=>setWPin(e.target.value)} style={{...INP,width:70}}/>
-          <select value={wRole} onChange={(e)=>setWRole(e.target.value)} style={{...INP,width:90}}><option value="waiter">Waiter</option><option value="admin">Admin</option></select>
-          <button className="btn" onClick={()=>{if(wN){act("addWaiter",{name:wN,pin:wPin,role:wRole,color:PAL[waiters.length%PAL.length]});setWN("");setWPin("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/></button></div>
+        <div className="flex wrap" style={{gap:8}}><input placeholder="Name" value={wN} onChange={(e)=>setWN(e.target.value)} style={{...INP,flex:1,minWidth:90}}/><input placeholder="PIN" value={wPin} onChange={(e)=>setWPin(e.target.value)} style={{...INP,width:64}}/>
+          <select value={wRole} onChange={(e)=>setWRole(e.target.value)} style={{...INP,width:88}}><option value="waiter">Waiter</option><option value="admin">Admin</option></select>
+          <button className="btn" onClick={()=>{if(wN&&wPin){act("addWaiter",{name:wN,pin:wPin,role:wRole,color:PAL[waiters.length%PAL.length]});setWN("");setWPin("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/></button></div>
         <div style={{display:"grid",gap:6,marginTop:10}}>{waiters.map((w)=>(<div key={w.id} className="flex ac" style={{...ROW}}>
           <span style={{width:10,height:10,borderRadius:10,background:w.color}}/><span style={{flex:1,fontSize:13,fontWeight:600}}>{w.name}</span>
+          <button className="btn" onClick={()=>{const p=prompt("New PIN for "+w.name);if(p!==null)act("updateWaiter",{id:w.id,patch:{pin:p}});}} style={{...CHIP,padding:"4px 8px",background:C.panel2,color:C.mute}}>PIN</button>
           <button className="btn" onClick={()=>act("updateWaiter",{id:w.id,patch:{role:w.role==="admin"?"waiter":"admin"}})} style={{...CHIP,padding:"4px 8px",background:w.role==="admin"?C.violet:C.panel3,color:w.role==="admin"?C.ink:C.mute}}>{w.role==="admin"?"Admin":"Waiter"}</button>
           <button className="btn" onClick={()=>act("deleteWaiter",{id:w.id})} style={{...ICON,width:26,height:26,cursor:"pointer"}}><Ico n="trash" size={12} color={C.red}/></button></div>))}</div>
-        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}>Admins can change setup and see reports. Waiters only take orders. Tap the role to switch it.</div>
+        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}>Everyone needs a PIN to log in. Admins see setup + reports; waiters only take orders.</div>
       </div>
-
       <Title>Floors ({floors.length})</Title>
       <div style={CARD}><div className="flex" style={{gap:8}}><input placeholder="Floor name" value={fN} onChange={(e)=>setFN(e.target.value)} style={{...INP,flex:1}}/><button className="btn" onClick={()=>{if(fN){act("addFloor",{name:fN});setFN("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/></button></div>
         <div className="flex wrap" style={{gap:6,marginTop:10}}>{floors.map((f)=>(<span key={f.id} className="flex ac" style={{gap:6,background:C.panel2,border:`1px solid ${C.line}`,borderRadius:20,padding:"5px 6px 5px 12px",fontSize:12.5}}>{f.name}<button className="btn" onClick={()=>act("deleteFloor",{id:f.id})} style={{...ICON,width:22,height:22,background:"transparent",cursor:"pointer"}}><Ico n="x" size={12} color={C.red}/></button></span>))}</div></div>
-
       <Title>Tables ({tables.length})</Title>
       <div style={CARD}><div className="flex" style={{gap:8}}><input placeholder="Name" value={tN} onChange={(e)=>setTN(e.target.value)} style={{...INP,flex:1}}/><input placeholder="Seats" type="number" value={tSe} onChange={(e)=>setTSe(e.target.value)} style={{...INP,width:66}}/></div>
         <div className="flex" style={{gap:8,marginTop:8}}><select value={tF} onChange={(e)=>setTF(e.target.value)} style={{...INP,flex:1}}>{floors.map((f)=><option key={f.id} value={f.id}>{f.name}</option>)}</select><button className="btn" onClick={()=>{if(tN&&tF){act("addTable",{name:tN,seats:parseInt(tSe)||4,floorId:tF,x:50,y:50});setTN("");}}} style={{display:"flex",alignItems:"center",gap:6,...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add</button></div>
         <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}>Change size, shape and position on the Floor screen (Arrange → tap a table).</div></div>
+    </div>
 
+    <div style={{gridColumn:mob?"auto":"1 / -1"}}>
+      <Title>Printers ({printers.length})</Title>
+      <div style={CARD}>
+        {printers.map((p)=>(<div key={p.id} className="flex ac wrap" style={{gap:8,padding:"8px 0",borderBottom:`1px solid ${C.line}`}}>
+          <button className="btn" onClick={()=>act("updatePrinter",{id:p.id,patch:{color:PAL[(PAL.indexOf(p.color)+1)%PAL.length]}})} title="change colour" style={{width:16,height:16,borderRadius:16,background:p.color,border:"none",cursor:"pointer",flexShrink:0}}/>
+          <input value={p.name} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{name:e.target.value}})} style={{...INP,width:110,padding:"6px 8px"}}/>
+          <input value={p.ip} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{ip:e.target.value}})} placeholder="IP address" style={{...INP,flex:1,minWidth:110,padding:"6px 8px"}}/>
+          <button className="btn" onClick={()=>act("setReceiptPrinter",{id:p.id})} title="prints the customer bill" style={{...CHIP,padding:"5px 8px",background:receiptPrinterId===p.id?C.green:C.panel3,color:receiptPrinterId===p.id?C.ink:C.mute}}>Bill</button>
+          <button className="btn" onClick={()=>act("updatePrinter",{id:p.id,patch:{all:!p.all}})} title="receives every item (expo / one-ticket copy)" style={{...CHIP,padding:"5px 8px",background:p.all?C.blue:C.panel3,color:p.all?C.ink:C.mute}}>All</button>
+          <button className="btn" onClick={()=>act("deletePrinter",{id:p.id})} style={{...ICON,width:26,height:26,cursor:"pointer"}}><Ico n="trash" size={12} color={C.red}/></button>
+        </div>))}
+        <div className="flex wrap" style={{gap:8,marginTop:10}}><input placeholder="Name (e.g. Grill / Pass)" value={prN} onChange={(e)=>setPrN(e.target.value)} style={{...INP,flex:1,minWidth:120}}/><input placeholder="IP" value={prIp} onChange={(e)=>setPrIp(e.target.value)} style={{...INP,width:110}}/>
+          <button className="btn" onClick={()=>{if(prN){act("addPrinter",{name:prN,ip:prIp,color:PAL[printers.length%PAL.length]});setPrN("");setPrIp("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add printer</button></div>
+        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}><b>Bill</b> = prints the customer receipt. <b>All</b> = an “everything” copy: that printer receives food + drinks together while items still go to their own stations too. Each non-Bill printer gets its own tab. Tap the dot to recolour.</div>
+      </div>
       <div style={{marginTop:8,borderTop:`1px solid ${C.line}`,paddingTop:16}}><button className="btn" onClick={()=>{if(confirm("Reset everything to demo defaults?"))act("reset",{});}} style={{...BIG,background:"transparent",border:`1px solid ${C.red}`,color:C.red,cursor:"pointer"}}>Reset all data to demo defaults</button></div>
     </div>
   </div>);
 }
 
 /* ---------- shared ---------- */
-function Overlay({children,center,onBackdrop}){return(<div onClick={onBackdrop?(e)=>{if(e.target===e.currentTarget)onBackdrop();}:undefined} style={{position:"fixed",inset:0,zIndex:20,background:"rgba(10,8,6,.72)",display:center?"grid":"block",placeItems:center?"center":undefined,padding:center?16:0}}>{center?children:<div style={{position:"absolute",inset:0,maxWidth:1100,margin:"0 auto"}}>{children}</div>}</div>);}
+function Overlay({children,center,onBackdrop}){return(<div onClick={onBackdrop?(e)=>{if(e.target===e.currentTarget)onBackdrop();}:undefined} style={{position:"fixed",inset:0,zIndex:20,background:"rgba(10,8,6,.72)",display:center?"grid":"block",placeItems:center?"center":undefined,padding:center?12:0}}>{center?children:<div style={{position:"absolute",inset:0,maxWidth:1100,margin:"0 auto"}}>{children}</div>}</div>);}
 function Center({children}){return<div style={{minHeight:"100vh",display:"grid",placeItems:"center",background:C.ink,color:C.text,fontFamily:SANS,padding:20}}>{children}</div>;}
 const Title=({children})=><h2 style={{fontSize:13,fontWeight:800,letterSpacing:1.5,textTransform:"uppercase",color:C.mute,margin:"0 0 4px"}}>{children}</h2>;
 const P=({children})=><p style={{color:C.mute,fontSize:12.5,margin:"6px 0 16px",maxWidth:640}}>{children}</p>;
 const Empty=({children})=><div style={{background:C.panel,border:`1px dashed ${C.line}`,borderRadius:12,padding:30,textAlign:"center",color:C.subtle,fontSize:13}}>{children}</div>;
 function Dot({pid}){return<span title={pName(pid)} style={{width:8,height:8,borderRadius:8,background:pColor(pid),flexShrink:0,display:"inline-block"}}/>;}
 const ICON={width:36,height:36,borderRadius:9,border:"none",background:C.panel2,display:"grid",placeItems:"center",color:C.text};
-const QTY={width:28,height:28,borderRadius:7,border:`1px solid ${C.line}`,background:C.panel2,display:"grid",placeItems:"center",color:C.text};
-const BIG={display:"flex",alignItems:"center",justifyContent:"center",gap:8,borderRadius:10,padding:"11px 14px",fontSize:13.5,fontFamily:SANS};
+const QTY={width:30,height:30,borderRadius:7,border:`1px solid ${C.line}`,background:C.panel2,display:"grid",placeItems:"center",color:C.text,flexShrink:0};
+const BIG={display:"flex",alignItems:"center",justifyContent:"center",gap:8,borderRadius:10,padding:"12px 14px",fontSize:13.5,fontFamily:SANS};
 const SMALL={display:"flex",alignItems:"center",borderRadius:20,padding:"8px 14px",fontSize:13,fontFamily:SANS,border:"none"};
 const CHIP={borderRadius:8,padding:"6px 12px",fontSize:12.5,fontWeight:700,border:"none",cursor:"pointer"};
 const INP={background:C.panel2,border:`1px solid ${C.line}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:13,fontFamily:SANS,outline:"none"};
 const CARD={background:C.panel,borderRadius:12,border:`1px solid ${C.line}`,padding:12,margin:"8px 0 16px"};
 const ROW={gap:8,background:C.panel,borderRadius:8,padding:"8px 10px",border:`1px solid ${C.line}`};
-const LBL={fontSize:11,color:C.mute,marginBottom:2};
+const LBL={fontSize:11,color:C.mute};
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
