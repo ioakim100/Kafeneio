@@ -44,15 +44,15 @@ const SEED = {
   ],
   // Printers you can add/remove. Each menu item points at one via printerId.
   printers: [
-    { id: "pk", name: "Kitchen", ip: "", color: "#D8735E" },
-    { id: "pb", name: "Bar", ip: "", color: "#E8A23D" },
+    { id: "pk", name: "Kitchen", ip: "", color: "#D8735E", mode: "own", food: true },
+    { id: "pb", name: "Bar", ip: "", color: "#E8A23D", mode: "rest" },
     { id: "pr", name: "Receipt", ip: "", color: "#7BC49A" },
   ],
   receiptPrinterId: "pr", // which printer prints the customer bill
   menu: [
-    { id: "m1", name: "Espresso", price: 2.0, cat: "Coffee", printerId: "pb" },
-    { id: "m2", name: "Freddo Cappuccino", price: 3.5, cat: "Coffee", printerId: "pb" },
-    { id: "m3", name: "Greek Coffee", price: 2.2, cat: "Coffee", printerId: "pb" },
+    { id: "m1", name: "Espresso", price: 2.0, cat: "Coffee", printerId: "pb", options: [{ id: "o1", name: "Sugar", required: false, multi: false, choices: ["No sugar", "1 sugar", "2 sugar"] }] },
+    { id: "m2", name: "Freddo Cappuccino", price: 3.5, cat: "Coffee", printerId: "pb", options: [{ id: "o1", name: "Sugar", required: true, multi: false, choices: ["Sketos", "Metrios", "Glykos"] }, { id: "o2", name: "Milk", required: false, multi: false, choices: ["Regular", "No milk", "Oat"] }] },
+    { id: "m3", name: "Greek Coffee", price: 2.2, cat: "Coffee", printerId: "pb", options: [{ id: "o1", name: "Sugar", required: true, multi: false, choices: ["Sketos", "Metrios", "Glykos", "Vari glykos"] }] },
     { id: "m4", name: "Orange Juice", price: 4.0, cat: "Cold Drinks", printerId: "pb" },
     { id: "m5", name: "Still Water", price: 0.5, cat: "Cold Drinks", printerId: "pb" },
     { id: "m6", name: "Draft Beer", price: 5.0, cat: "Cold Drinks", printerId: "pb" },
@@ -95,6 +95,10 @@ function migrate() {
     state.receiptPrinterId = "pr";
   }
   if (!state.receiptPrinterId) state.receiptPrinterId = (state.printers[state.printers.length - 1] || {}).id || "";
+  state.printers.forEach((p) => {
+    if (p.mode === undefined) p.mode = p.all ? "all" : (/bar/i.test(p.name) ? "rest" : "own");
+    if (p.food === undefined) p.food = /kitchen/i.test(p.name);
+  });
   // tables need a size
   state.tables.forEach((t) => { if (!t.size) t.size = "m"; if (!t.shape) t.shape = "square"; });
   // menu: station -> printerId
@@ -117,6 +121,13 @@ function save() { try { fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 
 const orderTotal = (o) => round2((o.items || []).reduce((s, x) => s + x.price * x.qty, 0));
 const waiterName = (id) => (state.waiters.find((w) => w.id === id) || {}).name || "—";
 const printerById = (id) => state.printers.find((p) => p.id === id);
+function printerReceives(pr, item) {
+  if (!item.printerId || item.printerId === state.receiptPrinterId) return false;
+  const mode = pr.mode || (pr.all ? "all" : "own");
+  if (mode === "all") return true;                                   // expo: everything
+  if (mode === "rest") { const q = printerById(item.printerId); return !!q && !q.food; } // everything except food
+  return item.printerId === pr.id;                                   // own items only
+}
 
 /* ---------------- live sync ---------------- */
 const clients = new Set();
@@ -138,6 +149,7 @@ function buildTicket({ title, table, servedBy, items, total, payments, priced })
   for (const it of items) {
     if (priced) p.push(cols(`${it.qty} x ${it.name}`, "EUR " + (it.qty * it.price).toFixed(2)));
     else p.push(B(CP.boldOn), L(`${it.qty} x ${it.name}`), B(CP.boldOff));
+    if (it.opts && it.opts.length) p.push(L("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / ")));
     if (it.note) p.push(L("   >> " + it.note));
   }
   if (priced && typeof total === "number") {
@@ -182,9 +194,10 @@ async function handleAction(type, payload = {}, waiterId) {
   switch (type) {
     case "addItem": {
       const o = state.open[p.tableId] || { items: [], openedAt: new Date().toISOString(), openedBy: waiterId, payments: [] };
-      const i = o.items.findIndex((x) => x.id === p.item.id && !x.sent);
+      const hasOpts = p.item.opts && p.item.opts.length;
+      const i = hasOpts ? -1 : o.items.findIndex((x) => x.id === p.item.id && !x.sent && !(x.opts && x.opts.length));
       if (i >= 0) o.items[i].qty += 1;
-      else o.items.push({ ...p.item, lid: uid(), qty: 1, waiterId, sent: false, done: false, note: "" });
+      else o.items.push({ ...p.item, opts: p.item.opts || null, lid: uid(), qty: 1, waiterId, sent: false, done: false, note: "" });
       state.open[p.tableId] = o; break;
     }
     case "changeQty": { const o = state.open[p.tableId]; if (!o) break; o.items[p.index].qty += p.delta; o.items = o.items.filter((x) => x.qty > 0); if (!o.items.length) delete state.open[p.tableId]; break; }
@@ -192,6 +205,7 @@ async function handleAction(type, payload = {}, waiterId) {
     case "setNote": { const o = state.open[p.tableId]; if (o && o.items[p.index]) o.items[p.index].note = p.note; break; }
     case "setDone": { const o = state.open[p.tableId]; if (o) { const it = o.items.find((x) => x.lid === p.lid); if (it) { it.done = p.done; it.doneAt = p.done ? new Date().toISOString() : null; } } break; }
     case "bumpStation": { const o = state.open[p.tableId]; if (o) o.items.forEach((x) => { if (x.printerId === p.printerId && x.sent && !x.done) { x.done = true; x.doneAt = new Date().toISOString(); } }); break; }
+    case "bumpList": { const o = state.open[p.tableId]; if (o) o.items.forEach((x) => { if ((p.lids || []).includes(x.lid) && !x.done) { x.done = true; x.doneAt = new Date().toISOString(); } }); break; }
     case "placeOrder": {
       const o = state.open[p.tableId]; if (!o) { print = { ok: false }; break; }
       const t = state.tables.find((x) => x.id === p.tableId);
@@ -201,7 +215,7 @@ async function handleAction(type, payload = {}, waiterId) {
       const results = [];
       for (const pr of state.printers) {
         if (pr.id === state.receiptPrinterId) continue;
-        const items = pr.all ? prepNewly : prepNewly.filter((x) => x.printerId === pr.id); // pr.all = expo, gets everything
+        const items = prepNewly.filter((x) => printerReceives(pr, x));
         if (!items.length) continue;
         results.push(await printPrep(pr, t?.name, waiterId, items));
       }

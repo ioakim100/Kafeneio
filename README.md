@@ -16,6 +16,8 @@ Default logins (change the PINs in Setup): **Manager** admin — PIN **1234**; *
 
 Handy behaviours: pressing **Send order** fires silently and drops you back on the tables for the next one; a prep printer marked **All** gets a one-ticket copy of the whole order while items still go to their own stations; on a prep screen you can tap an item to mark it delivered and **undo** it from "Recently delivered"; and at payment you can switch to **Pick items** to charge one guest for just their items.
 
+**Item choices (modifiers):** give any product questions like *Sugar: Sketos/Metrios/Glykos* or *Milk: yes/no* under **Setup → Menu → the sliders icon**. When a waiter taps that product it asks the questions, and the answers show on the order, the kitchen/bar ticket and the receipt. (The demo coffees already have sugar/milk choices.)
+
 ## Run it
 1. Install **Node.js 18+** — https://nodejs.org
 2. In this folder, run:
@@ -33,8 +35,9 @@ Data is saved to `data.json` in this folder. Delete it (or use *Setup → Reset*
 
 ## Printers
 In **Setup → Printers** (admin): add a printer with a name and its IP address, mark one as **Bill** (the customer
-receipt), and tap a printer's dot to recolour it. Then, per menu item, choose which printer it prints to. Add a
-"Grill" or "Cold station" printer any time — it automatically gets its own tab.
+receipt), and set what each screen **Shows** — *Own items*, *All except food* (the Bar catch-all: every drink/other
+item, skipping any station marked **Food**), or *Everything* (an expo copy). Then, per menu item, choose which printer
+it prints to. Each non-Bill printer automatically gets its own tab.
 
 Any ESC/POS thermal printer on the same network (Epson TM, Star TSP, Bixolon, Citizen, most generic ones) on the
 standard port 9100 works. The server sends the ticket straight to the printer — nothing to install on the printer side.
