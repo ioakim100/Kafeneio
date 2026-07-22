@@ -139,7 +139,7 @@ function App(){
       <TopBar tabs={tabs} view={view} setView={setView} waiter={waiter} openCount={Object.keys(open).length} onLogout={()=>{localStorage.removeItem("waiter");setWaiter(null);}}/>
       <div style={{padding:mob?10:16}}>
         {view==="floor"&&<Floor floors={floors} floorId={floorId} setFloorId={setFloorId} tables={floorTables} open={open} arrange={arrange} setArrange={setArrange} now={now} isAdmin={isAdmin} onPick={(t)=>setActiveId(t.id)}/>}
-        {view==="orders"&&<Orders open={open} tables={tables} floors={floors} now={now} onPick={(t)=>setActiveId(t.id)}/>}
+        {view==="orders"&&<Orders open={open} tables={tables} floors={floors} now={now} onPick={(t)=>setActiveId(t.id)} onPay={(t)=>setPayId(t.id)}/>}
         {prepView&&<Prep printer={prepView} receiptId={state.receiptPrinterId} open={open} tables={tables} floors={floors} now={now}/>}
         {view==="reports"&&isAdmin&&<Reports sales={state.sales} waiters={waiters}/>}
         {view==="setup"&&isAdmin&&<Setup state={state} mob={mob}/>}
@@ -248,18 +248,21 @@ function TableEditor({t,onClose}){
 }
 
 /* ---------- all orders ---------- */
-function Orders({open,tables,floors,now,onPick}){
+function Orders({open,tables,floors,now,onPick,onPay}){
   const list=Object.entries(open).map(([tid,o])=>{const t=tables.find((x)=>x.id===tid);const f=floors.find((x)=>x.id===(t&&t.floorId));return{tid,t,floor:f&&f.name,o};}).filter((r)=>r.o.items.length).sort((a,b)=>new Date(a.o.openedAt)-new Date(b.o.openedAt));
-  return(<div><Title>All open orders</Title><P>Every table in service — all items together. Tap to edit.</P>
+  return(<div><Title>All open orders</Title><P>Every table in service — all items together. Tap a card to edit it, or hit Pay to charge it straight away.</P>
     {list.length===0?<Empty>No tables are open right now.</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))"}}>
       {list.map((r)=>{const total=orderTotal(r.o);const paid=paidSum(r.o);const st=tableStatus(r.o);return(
-        <button key={r.tid} className="btn" onClick={()=>onPick(r.t)} style={{textAlign:"left",background:C.panel,border:`1px solid ${C.line}`,borderTop:`3px solid ${STCOL[st]}`,borderRadius:14,padding:14,color:C.text,cursor:"pointer"}}>
+        <div key={r.tid} className="btn" onClick={()=>onPick(r.t)} style={{textAlign:"left",background:C.panel,border:`1px solid ${C.line}`,borderTop:`3px solid ${STCOL[st]}`,borderRadius:14,padding:14,color:C.text,cursor:"pointer"}}>
           <div className="flex ac jb"><span style={{fontWeight:800,fontSize:17}}>{r.t.name}</span><span className="flex ac" style={{gap:4,fontSize:11,color:C.mute,fontFamily:MONO}}><Ico n="clock" size={11}/> {relTime(r.o.openedAt,now)}</span></div>
           <div className="flex ac wrap" style={{gap:8,marginTop:2}}><span style={{fontSize:11,color:C.subtle}}>{r.floor}</span><span style={{fontSize:10,fontWeight:700,color:STCOL[st],textTransform:"uppercase"}}>· {STLABEL[st]}</span>{r.o.openedBy&&<span className="flex ac" style={{gap:4,fontSize:11,color:C.text,fontWeight:600}}><span style={{width:9,height:9,borderRadius:9,background:wColor(r.o.openedBy)}}/>{wLabel(r.o.openedBy)}</span>}</div>
           <div style={{margin:"10px 0",borderTop:`1px solid ${C.line}`}}/>
           {r.o.items.map((x,i)=>(<div key={i}><div className="flex ac" style={{gap:7,padding:"3px 0",fontSize:13,opacity:x.done?.5:1}}><Dot pid={x.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span>{!x.sent&&<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}<span style={{fontFamily:MONO,color:C.mute,fontSize:12}}>{euro(x.price*x.qty)}</span></div>{x.opts&&x.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(x)}</div>}{x.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {x.note}</div>}</div>))}
-          <div className="flex ac" style={{margin:"10px 0 0",borderTop:`1px dashed ${C.line}`,paddingTop:8}}><span style={{flex:1,fontSize:12,color:C.mute}}>{paid>0?`Paid ${euro(paid)} · left`:"Total"}</span><span style={{fontFamily:MONO,fontSize:18,fontWeight:800,color:C.amber}}>{euro(total-paid)}</span></div>
-        </button>);})}
+          <div className="flex ac" style={{margin:"10px 0 0",borderTop:`1px dashed ${C.line}`,paddingTop:10,gap:10}}>
+            <div style={{flex:1,minWidth:0}}><div style={{fontSize:10.5,color:C.mute}}>{paid>0?"Left to pay":"Total"}</div><div style={{fontFamily:MONO,fontSize:19,fontWeight:800,color:C.amber}}>{euro(total-paid)}</div></div>
+            <button className="btn" onClick={(e)=>{e.stopPropagation();onPay(r.t);}} style={{display:"flex",alignItems:"center",gap:7,padding:"10px 18px",borderRadius:10,background:C.green,border:"none",color:C.ink,fontWeight:800,fontSize:14,cursor:"pointer"}}><Ico n="check" size={16}/> Pay</button>
+          </div>
+        </div>);})}
     </div>)}
   </div>);
 }
@@ -298,7 +301,7 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onC
   const [cat,setCat]=useState("All");const [noteIdx,setNoteIdx]=useState(-1);const [noteVal,setNoteVal]=useState("");const [pane,setPane]=useState("menu");
   const cats=useMemo(()=>["All",...Array.from(new Set(menu.map((m)=>m.cat)))],[menu]);
   const shown=cat==="All"?menu:menu.filter((m)=>m.cat===cat);
-  const items=(order&&order.items)||[];const total=orderTotal(order);const paid=paidSum(order);
+  const items=(order&&order.items)||[];const total=orderTotal(order);const paid=paidSum(order);const paidMap=paidQtyMap(order);
   const unsent=items.filter((x)=>!x.sent).length;const nItems=items.reduce((s,x)=>s+x.qty,0);
   const counts={};items.forEach((x)=>{if(!x.sent)counts[x.id]=(counts[x.id]||0)+x.qty;});
   const openNote=(i)=>{setNoteIdx(i);setNoteVal(items[i].note||"");};const saveNote=()=>{onNote(noteIdx,noteVal);setNoteIdx(-1);};
@@ -313,10 +316,10 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onC
   </div>);
   const OrderPane=(<div style={{flex:1,minWidth:0,overflowY:"auto",padding:12}}>
     {items.length===0?<div style={{color:C.subtle,fontSize:13,padding:"30px 8px"}}>No items yet. Tap products — drinks and food — then send the order.</div>:
-      items.map((x,i)=>(<div key={i} style={{borderBottom:`1px solid ${C.line}`,padding:"9px 0",opacity:x.done?.55:1}}>
+      items.map((x,i)=>{const pq=paidMap[x.lid]||0;return(<div key={i} style={{borderBottom:`1px solid ${C.line}`,padding:"9px 0",opacity:(x.done||pq>=x.qty)?.55:1}}>
         <div className="flex ac" style={{gap:8}}><Dot pid={x.printerId}/>
           <div style={{flex:1,minWidth:0}}><div className="flex ac" style={{gap:6}}><span style={{fontSize:13.5,fontWeight:600}}>{x.name}</span>
-            {x.sent?<span style={{fontSize:9,fontWeight:800,color:x.done?C.green:C.blue,border:`1px solid ${x.done?C.greenDim:C.blueDim}`,borderRadius:4,padding:"0 4px"}}>{x.done?"DONE":"SENT"}</span>:<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}</div>
+            {x.sent?<span style={{fontSize:9,fontWeight:800,color:x.done?C.green:C.blue,border:`1px solid ${x.done?C.greenDim:C.blueDim}`,borderRadius:4,padding:"0 4px"}}>{x.done?"DONE":"SENT"}</span>:<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}{pq>0&&<span style={{fontSize:9,fontWeight:800,color:C.ink,background:C.green,borderRadius:4,padding:"1px 5px"}}>{pq>=x.qty?"PAID":`PAID ${pq}/${x.qty}`}</span>}</div>
             <div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{euro(x.price)} · {wname(x.waiterId)}</div></div>
           <button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button>
           <span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span>
@@ -325,7 +328,7 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onC
           <button className="btn" onClick={()=>onRemove(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>
         {x.opts&&x.opts.length>0&&<div style={{fontSize:13,fontWeight:700,color:C.violet,marginLeft:16,marginTop:3}}>↳ {optsText(x)}</div>}
         {noteIdx===i?(<div className="flex ac" style={{gap:6,marginTop:6,marginLeft:16}}><input autoFocus value={noteVal} onChange={(e)=>setNoteVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveNote();}} placeholder="e.g. no onions…" style={{...INP,flex:1,fontSize:12}}/><button className="btn" onClick={saveNote} style={{...QTY,width:32,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></div>):x.note?<div style={{fontSize:13,fontWeight:700,color:C.blue,marginLeft:16,marginTop:3}}>✎ {x.note}</div>:null}
-      </div>))}
+      </div>);})}
   </div>);
   return(<Overlay><div style={{display:"flex",flexDirection:"column",height:"100%",background:C.ink}}>
     <div className="flex ac" style={{gap:12,padding:14,borderBottom:`1px solid ${C.line}`,background:C.panel}}>
