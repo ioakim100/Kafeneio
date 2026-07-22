@@ -280,8 +280,8 @@ function Prep({printer,receiptId,open,tables,floors,now}){
         <div className="flex ac jb" style={{borderBottom:`1.5px dashed ${C.paperLine}`,paddingBottom:8}}><div><div style={{fontWeight:800,fontSize:16,fontFamily:SANS}}>{t.name}</div><div style={{fontSize:10.5}}>{t.floor} · {relTime(t.openedAt,now)}{t.openedBy?" · "+wLabel(t.openedBy):""}</div></div>{t.openedBy&&<span title={wLabel(t.openedBy)} style={{width:18,height:18,borderRadius:18,background:wColor(t.openedBy),display:"grid",placeItems:"center",fontSize:10,fontWeight:800,color:"#241D14"}}>{(wLabel(t.openedBy)[0]||"").toUpperCase()}</span>}</div>
         <div style={{padding:"6px 0"}}>{t.items.map((x)=>(<button key={x.lid} className="btn" onClick={()=>act("setDone",{tableId:t.tid,lid:x.lid,done:true})} style={{width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"6px 0",cursor:"pointer",color:"#2A231A",borderBottom:`1px dotted ${C.paperLine}`}}>
           <div className="flex ac" style={{gap:8,fontSize:14}}><Ico n="circle" size={17} color="#B08A55"/><span style={{fontWeight:700}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span></div>
-          {x.opts&&x.opts.length>0&&<div style={{fontSize:12,color:"#7A3AA0",marginLeft:25}}>↳ {optsText(x)}</div>}
-          {x.note&&<div style={{fontSize:12,color:"#8A5A2A",marginLeft:25}}>↳ {x.note}</div>}</button>))}</div>
+          {x.opts&&x.opts.length>0&&<div style={{fontSize:14,fontWeight:800,color:"#5E2A86",background:"#EAD7F5",borderRadius:7,padding:"4px 9px",margin:"5px 0 0 25px"}}>{optsText(x)}</div>}
+          {x.note&&<div style={{fontSize:14,fontWeight:800,color:"#7A4A10",background:"#F4E3BE",borderRadius:7,padding:"4px 9px",margin:"5px 0 0 25px"}}>✎ {x.note}</div>}</button>))}</div>
         <button className="btn" onClick={()=>act("bumpList",{tableId:t.tid,lids:t.items.map((x)=>x.lid)})} style={{width:"100%",background:"#2A231A",color:C.paper,border:"none",borderRadius:8,padding:"9px 0",fontFamily:SANS,fontWeight:700,cursor:"pointer"}}>Deliver all</button>
       </div>))}
     </div>)}
@@ -323,8 +323,8 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onC
           <button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button>
           <button className="btn" onClick={()=>openNote(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="note" size={13} color={x.note?C.blue:C.mute}/></button>
           <button className="btn" onClick={()=>onRemove(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>
-        {x.opts&&x.opts.length>0&&<div style={{fontSize:11.5,color:C.violet,marginLeft:16,marginTop:2}}>↳ {optsText(x)}</div>}
-        {noteIdx===i?(<div className="flex ac" style={{gap:6,marginTop:6,marginLeft:16}}><input autoFocus value={noteVal} onChange={(e)=>setNoteVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveNote();}} placeholder="e.g. no onions…" style={{...INP,flex:1,fontSize:12}}/><button className="btn" onClick={saveNote} style={{...QTY,width:32,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></div>):x.note?<div style={{fontSize:11.5,color:C.blue,marginLeft:16,marginTop:2}}>↳ {x.note}</div>:null}
+        {x.opts&&x.opts.length>0&&<div style={{fontSize:13,fontWeight:700,color:C.violet,marginLeft:16,marginTop:3}}>↳ {optsText(x)}</div>}
+        {noteIdx===i?(<div className="flex ac" style={{gap:6,marginTop:6,marginLeft:16}}><input autoFocus value={noteVal} onChange={(e)=>setNoteVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveNote();}} placeholder="e.g. no onions…" style={{...INP,flex:1,fontSize:12}}/><button className="btn" onClick={saveNote} style={{...QTY,width:32,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></div>):x.note?<div style={{fontSize:13,fontWeight:700,color:C.blue,marginLeft:16,marginTop:3}}>✎ {x.note}</div>:null}
       </div>))}
   </div>);
   return(<Overlay><div style={{display:"flex",flexDirection:"column",height:"100%",background:C.ink}}>

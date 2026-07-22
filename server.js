@@ -94,7 +94,12 @@ function migrate() {
     ];
     state.receiptPrinterId = "pr";
   }
-  if (!state.receiptPrinterId) state.receiptPrinterId = (state.printers[state.printers.length - 1] || {}).id || "";
+  const rp = state.printers.find((p) => p.id === state.receiptPrinterId);
+  if (!rp || /kitchen|bar|κουζ|μπαρ/i.test(rp.name)) {   // a Kitchen/Bar must never be the bill printer, or its tab vanishes
+    let r = state.printers.find((p) => /receipt|bill|ταμ|apodei|katast/i.test(p.name));
+    if (!r) { r = { id: "pr", name: "Receipt", ip: "", color: "#7BC49A" }; state.printers.push(r); }
+    state.receiptPrinterId = r.id;
+  }
   state.printers.forEach((p) => {
     if (p.mode === undefined) p.mode = p.all ? "all" : (/bar/i.test(p.name) ? "rest" : "own");
     if (p.food === undefined) p.food = /kitchen/i.test(p.name);
