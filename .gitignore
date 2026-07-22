@@ -1,0 +1,14 @@
+# Live sales/state data — created at runtime, should not be in the repo
+data.json
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+.idea/
+*.swp
