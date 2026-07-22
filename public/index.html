@@ -273,28 +273,29 @@ function Orders({open,tables,floors,now,onPick,onPay,waiter}){
 /* ---------- prep display + undo ---------- */
 function Prep({printer,receiptId,open,tables,floors,now}){
   const match=(x)=>printerReceives(printer,x,receiptId);
+  const rem=(x)=>x.qty-(x.doneQty||0);
   const tickets=Object.entries(open).map(([tid,o])=>{const t=tables.find((x)=>x.id===tid);const f=floors.find((x)=>x.id===(t&&t.floorId));
-    return{tid,name:t&&t.name,floor:f&&f.name,openedAt:o.openedAt,openedBy:o.openedBy,items:o.items.filter((x)=>match(x)&&x.sent&&!x.done)};}).filter((t)=>t.items.length).sort((a,b)=>new Date(a.openedAt)-new Date(b.openedAt));
-  const recent=[];Object.entries(open).forEach(([tid,o])=>{const t=tables.find((x)=>x.id===tid);(o.items||[]).forEach((x)=>{if(match(x)&&x.sent&&x.done&&x.doneAt)recent.push({...x,table:t&&t.name,tid});});});
+    return{tid,name:t&&t.name,floor:f&&f.name,openedAt:o.openedAt,openedBy:o.openedBy,items:o.items.filter((x)=>match(x)&&x.sent&&rem(x)>0)};}).filter((t)=>t.items.length).sort((a,b)=>new Date(a.openedAt)-new Date(b.openedAt));
+  const recent=[];Object.entries(open).forEach(([tid,o])=>{const t=tables.find((x)=>x.id===tid);(o.items||[]).forEach((x)=>{if(match(x)&&x.sent&&(x.doneQty||0)>0&&x.doneAt)recent.push({...x,table:t&&t.name,tid});});});
   recent.sort((a,b)=>new Date(b.doneAt)-new Date(a.doneAt));
   const recentShown=recent.filter((x)=>Date.now()-new Date(x.doneAt).getTime()<45*60000).slice(0,12);
   return(<div>
     <div className="flex ac" style={{gap:8}}><span style={{width:12,height:12,borderRadius:12,background:printer.color}}/><Title>{printer.name} display{printer.all?" · everything":""}</Title></div>
-    <P>Tap an item once delivered — a fully delivered ticket leaves this screen and stays only in All orders. Made a mistake? Undo it below.</P>
-    {tickets.length===0?<Empty>Nothing waiting at {printer.name}.</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))"}}>
-      {tickets.map((t)=>(<div key={t.tid} className="pop" style={{background:C.paper,borderRadius:12,padding:14,color:"#2A231A",fontFamily:MONO,boxShadow:`0 2px 0 ${C.paperLine}`,borderTop:`4px solid ${printer.color}`}}>
+    <P>Tap an item to deliver one — if there are several, tap again for each. When all units are delivered the ticket leaves this screen. Made a mistake? Undo it below.</P>
+    {tickets.length===0?<Empty>Nothing waiting at {printer.name}.</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",alignItems:"start"}}>
+      {tickets.map((t)=>(<div key={t.tid} className="pop" style={{display:"flex",flexDirection:"column",minHeight:150,background:C.paper,borderRadius:12,padding:14,color:"#2A231A",fontFamily:MONO,boxShadow:`0 2px 0 ${C.paperLine}`,borderTop:`4px solid ${printer.color}`}}>
         <div className="flex ac jb" style={{borderBottom:`1.5px dashed ${C.paperLine}`,paddingBottom:8}}><div><div style={{fontWeight:800,fontSize:16,fontFamily:SANS}}>{t.name}</div><div style={{fontSize:10.5}}>{t.floor} · {relTime(t.openedAt,now)}{t.openedBy?" · "+wLabel(t.openedBy):""}</div></div>{t.openedBy&&<span title={wLabel(t.openedBy)} style={{width:18,height:18,borderRadius:18,background:wColor(t.openedBy),display:"grid",placeItems:"center",fontSize:10,fontWeight:800,color:"#241D14"}}>{(wLabel(t.openedBy)[0]||"").toUpperCase()}</span>}</div>
-        <div style={{padding:"6px 0"}}>{t.items.map((x)=>(<button key={x.lid} className="btn" onClick={()=>act("setDone",{tableId:t.tid,lid:x.lid,done:true})} style={{width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"6px 0",cursor:"pointer",color:"#2A231A",borderBottom:`1px dotted ${C.paperLine}`}}>
-          <div className="flex ac" style={{gap:8,fontSize:14}}><Ico n="circle" size={17} color="#B08A55"/><span style={{fontWeight:700}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span></div>
+        <div style={{padding:"6px 0"}}>{t.items.map((x)=>{const done=x.doneQty||0;const left=x.qty-done;return(<button key={x.lid} className="btn" onClick={()=>act("setDoneQty",{tableId:t.tid,lid:x.lid,qty:done+1})} title="tap to deliver one" style={{width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"6px 0",cursor:"pointer",color:"#2A231A",borderBottom:`1px dotted ${C.paperLine}`}}>
+          <div className="flex ac" style={{gap:8,fontSize:14}}><Ico n="circle" size={17} color="#B08A55"/><span style={{fontWeight:800}}>{left}×</span><span style={{flex:1}}>{x.name}</span>{done>0&&<span style={{fontSize:11,fontWeight:800,color:"#2E7D4F"}}>{done}/{x.qty} done</span>}</div>
           {x.opts&&x.opts.length>0&&<div style={{fontSize:14,fontWeight:800,color:"#5E2A86",background:"#EAD7F5",borderRadius:7,padding:"4px 9px",margin:"5px 0 0 25px"}}>{optsText(x)}</div>}
-          {x.note&&<div style={{fontSize:14,fontWeight:800,color:"#7A4A10",background:"#F4E3BE",borderRadius:7,padding:"4px 9px",margin:"5px 0 0 25px"}}>✎ {x.note}</div>}</button>))}</div>
-        <button className="btn" onClick={()=>act("bumpList",{tableId:t.tid,lids:t.items.map((x)=>x.lid)})} style={{width:"100%",background:"#2A231A",color:C.paper,border:"none",borderRadius:8,padding:"9px 0",fontFamily:SANS,fontWeight:700,cursor:"pointer"}}>Deliver all</button>
+          {x.note&&<div style={{fontSize:14,fontWeight:800,color:"#7A4A10",background:"#F4E3BE",borderRadius:7,padding:"4px 9px",margin:"5px 0 0 25px"}}>✎ {x.note}</div>}</button>);})}</div>
+        <button className="btn" onClick={()=>act("bumpList",{tableId:t.tid,lids:t.items.map((x)=>x.lid)})} style={{width:"100%",marginTop:"auto",background:"#2A231A",color:C.paper,border:"none",borderRadius:8,padding:"9px 0",fontFamily:SANS,fontWeight:700,cursor:"pointer"}}>Deliver all</button>
       </div>))}
     </div>)}
     {recentShown.length>0&&<div style={{marginTop:20}}>
       <div style={{fontSize:12,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:C.mute,marginBottom:8}}>Recently delivered — tap to undo</div>
-      <div className="flex wrap" style={{gap:8}}>{recentShown.map((x)=>(<button key={x.lid} className="btn" onClick={()=>act("setDone",{tableId:x.tid,lid:x.lid,done:false})} style={{display:"flex",alignItems:"center",gap:8,background:C.panel,border:`1px solid ${C.line}`,borderRadius:20,padding:"7px 12px",color:C.text,cursor:"pointer",fontSize:12.5}}>
-        <Ico n="undo" size={13} color={C.blue}/><span style={{color:C.mute,fontFamily:MONO}}>{x.qty}×</span> {x.name} <span style={{color:C.subtle}}>· {x.table}</span></button>))}</div>
+      <div className="flex wrap" style={{gap:8}}>{recentShown.map((x)=>(<button key={x.lid} className="btn" onClick={()=>act("setDoneQty",{tableId:x.tid,lid:x.lid,qty:(x.doneQty||0)-1})} style={{display:"flex",alignItems:"center",gap:8,background:C.panel,border:`1px solid ${C.line}`,borderRadius:20,padding:"7px 12px",color:C.text,cursor:"pointer",fontSize:12.5}}>
+        <Ico n="undo" size={13} color={C.blue}/><span style={{color:C.mute,fontFamily:MONO}}>{x.doneQty}/{x.qty}</span> {x.name} <span style={{color:C.subtle}}>· {x.table}</span></button>))}</div>
     </div>}
   </div>);
 }

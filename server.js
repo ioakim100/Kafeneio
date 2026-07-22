@@ -118,6 +118,7 @@ function migrate() {
     if (!it.lid) it.lid = uid();
     if (it.printerId === undefined) { const m = state.menu.find((x) => x.id === it.id); it.printerId = m ? m.printerId : (map[it.station] ?? ""); }
     if (it.done === undefined) it.done = false;
+    if (it.doneQty === undefined) it.doneQty = it.done ? it.qty : 0;
     if (it.sent === undefined) it.sent = true;
   }));
 }
@@ -202,15 +203,16 @@ async function handleAction(type, payload = {}, waiterId) {
       const hasOpts = p.item.opts && p.item.opts.length;
       const i = hasOpts ? -1 : o.items.findIndex((x) => x.id === p.item.id && !x.sent && !(x.opts && x.opts.length));
       if (i >= 0) o.items[i].qty += 1;
-      else o.items.push({ ...p.item, opts: p.item.opts || null, lid: uid(), qty: 1, waiterId, sent: false, done: false, note: "" });
+      else o.items.push({ ...p.item, opts: p.item.opts || null, lid: uid(), qty: 1, waiterId, sent: false, done: false, doneQty: 0, note: "" });
       state.open[p.tableId] = o; break;
     }
-    case "changeQty": { const o = state.open[p.tableId]; if (!o) break; o.items[p.index].qty += p.delta; o.items = o.items.filter((x) => x.qty > 0); if (!o.items.length) delete state.open[p.tableId]; break; }
+    case "changeQty": { const o = state.open[p.tableId]; if (!o) break; const it = o.items[p.index]; if (it) { it.qty += p.delta; it.doneQty = Math.min(it.doneQty || 0, Math.max(0, it.qty)); it.done = it.qty > 0 && it.doneQty >= it.qty; } o.items = o.items.filter((x) => x.qty > 0); if (!o.items.length) delete state.open[p.tableId]; break; }
     case "removeItem": { const o = state.open[p.tableId]; if (!o) break; o.items.splice(p.index, 1); if (!o.items.length) delete state.open[p.tableId]; break; }
     case "setNote": { const o = state.open[p.tableId]; if (o && o.items[p.index]) o.items[p.index].note = p.note; break; }
-    case "setDone": { const o = state.open[p.tableId]; if (o) { const it = o.items.find((x) => x.lid === p.lid); if (it) { it.done = p.done; it.doneAt = p.done ? new Date().toISOString() : null; } } break; }
-    case "bumpStation": { const o = state.open[p.tableId]; if (o) o.items.forEach((x) => { if (x.printerId === p.printerId && x.sent && !x.done) { x.done = true; x.doneAt = new Date().toISOString(); } }); break; }
-    case "bumpList": { const o = state.open[p.tableId]; if (o) o.items.forEach((x) => { if ((p.lids || []).includes(x.lid) && !x.done) { x.done = true; x.doneAt = new Date().toISOString(); } }); break; }
+    case "setDone": { const o = state.open[p.tableId]; if (o) { const it = o.items.find((x) => x.lid === p.lid); if (it) { it.done = p.done; it.doneQty = p.done ? it.qty : 0; it.doneAt = p.done ? new Date().toISOString() : null; } } break; }
+    case "setDoneQty": { const o = state.open[p.tableId]; if (o) { const it = o.items.find((x) => x.lid === p.lid); if (it) { it.doneQty = Math.max(0, Math.min(it.qty, p.qty)); it.done = it.doneQty >= it.qty; it.doneAt = it.doneQty > 0 ? new Date().toISOString() : null; } } break; }
+    case "bumpStation": { const o = state.open[p.tableId]; if (o) o.items.forEach((x) => { if (x.printerId === p.printerId && x.sent && !x.done) { x.doneQty = x.qty; x.done = true; x.doneAt = new Date().toISOString(); } }); break; }
+    case "bumpList": { const o = state.open[p.tableId]; if (o) o.items.forEach((x) => { if ((p.lids || []).includes(x.lid)) { x.doneQty = x.qty; x.done = true; x.doneAt = new Date().toISOString(); } }); break; }
     case "placeOrder": {
       const o = state.open[p.tableId]; if (!o) { print = { ok: false }; break; }
       const t = state.tables.find((x) => x.id === p.tableId);
