@@ -118,6 +118,7 @@ function migrate() {
   // menu: station -> printerId
   const map = { kitchen: "pk", bar: "pb", none: "" };
   state.menu.forEach((m) => { if (m.printerId === undefined) m.printerId = map[m.station] ?? "pb"; delete m.station; if (m.vat === undefined) m.vat = m.cat === "Cold Drinks" ? 24 : 13; if (m.unit === undefined) m.unit = "each"; });
+  if (!state._adjSeeded) { if (!state.menu.some((m) => m.unit === "open")) state.menu.push({ id: uid(), name: "Charge / Discount", price: 0, cat: "Other", printerId: "", vat: 0, unit: "open" }); state._adjSeeded = true; }
   // waiters: role + ensure an admin exists
   state.waiters.forEach((w) => { if (!w.role) w.role = "waiter"; });
   if (!state.waiters.some((w) => w.role === "admin"))
