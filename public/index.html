@@ -558,7 +558,7 @@ const Muted2=({children})=>(<div style={{fontSize:12.5,color:C.subtle}}>{childre
 /* ---------- setup (printers last) ---------- */
 function Setup({state,mob}){
   const {menu,tables,floors,printers,waiters,receiptPrinterId}=state;
-  const [pN,setPN]=useState(""),[pP,setPP]=useState(""),[pC,setPC]=useState("Food"),[pPr,setPPr]=useState(printers[0]&&printers[0].id||"");
+  const [pN,setPN]=useState(""),[pP,setPP]=useState(""),[pC,setPC]=useState("Coffee"),[pPr,setPPr]=useState((printers.find((p)=>!p.food&&p.id!==receiptPrinterId)||printers[0]||{}).id||"");
   const [fN,setFN]=useState("");const [tN,setTN]=useState(""),[tSe,setTSe]=useState("4"),[tF,setTF]=useState(floors[0]&&floors[0].id);
   const [wN,setWN]=useState(""),[wPin,setWPin]=useState(""),[wRole,setWRole]=useState("waiter");
   const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);const [pVat,setPVat]=useState("13");const [mq,setMq]=useState("");const [mexp,setMexp]=useState({});
@@ -574,7 +574,7 @@ function Setup({state,mob}){
       </div>
       <div style={{display:"grid",gap:6}}>
         {(()=>{const rowEl=(m)=>(<div key={m.id} className="flex ac" style={{...ROW,borderLeft:`3px solid ${catColor(m.cat)}`}}>
-          <span style={{flex:1,fontSize:13}}>{m.name}</span>
+          <span style={{flex:1,fontSize:13}}>{m.name}{!m.printerId&&<span title="No printer — this won't print or show on any Kitchen/Bar screen" style={{marginLeft:8,fontSize:9,fontWeight:800,color:C.red,border:`1px solid ${C.red}`,borderRadius:4,padding:"0 4px"}}>NO STATION</span>}</span>
           <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:80}}><option value="">No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
           <select value={m.vat!=null?m.vat:13} onChange={(e)=>act("updateProduct",{id:m.id,patch:{vat:parseInt(e.target.value)}})} title="VAT" style={{...INP,padding:"4px 4px",fontSize:11.5,width:62}}>{[0,6,13,24].map((v)=><option key={v} value={v}>{v}%</option>)}</select>
           <span style={{fontFamily:MONO,color:C.amber,fontSize:13,width:50,textAlign:"right"}}>{euro(m.price)}</span>
