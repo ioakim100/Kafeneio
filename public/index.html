@@ -46,7 +46,7 @@ const euro=(n)=>"€"+(Number(n)||0).toFixed(2);
 const round2=(n)=>Math.round(n*100)/100;
 const lineGross=(x)=>round2((x.unit==="kg"?x.price*(x.weight||0):x.price)*(x.qty||1));
 const perUnit=(x)=>x.unit==="kg"?round2(x.price*(x.weight||0)):x.price;
-const qtyLabel=(x)=>x.unit==="kg"?((x.weight||0)+" kg"):(x.qty+"×");
+const qtyLabel=(x)=>x.unit==="kg"?((x.weight||0)+" kg"):x.unit==="open"?"":(x.qty+"×");
 const orderTotal=(o)=>round2((o?.items||[]).reduce((s,x)=>s+lineGross(x),0));
 const paidSum=(o)=>round2((o?.payments||[]).reduce((s,x)=>s+x.amount,0));
 const paidQtyMap=(o)=>{const m={};(o?.payments||[]).forEach(p=>(p.lines||[]).forEach(l=>{m[l.lid]=(m[l.lid]||0)+l.qty;}));return m;};
@@ -167,9 +167,9 @@ function App(){
         {view==="setup"&&isAdmin&&<Setup state={state} mob={mob}/>}
       </div>
       {active&&<OrderScreen table={active} order={activeOrder} menu={state.menu} wname={wname} mob={mob}
-        onAdd={(m,opts,weight)=>act("addItem",{tableId:active.id,item:{id:m.id,name:m.name,price:m.price,printerId:m.printerId,vat:m.vat,unit:m.unit,weight:weight||null,opts:opts||null}})}
+        onAdd={(m,opts,weight,amount)=>act("addItem",{tableId:active.id,item:{id:m.id,name:m.name,price:(m.unit==="open"&&amount!=null)?amount:m.price,printerId:m.printerId,vat:m.vat,unit:m.unit,weight:weight||null,opts:opts||null}})}
         onQty={(i,d)=>act("changeQty",{tableId:active.id,index:i,delta:d})} onRemove={(i)=>act("removeItem",{tableId:active.id,index:i})}
-        onNote={(i,note)=>act("setNote",{tableId:active.id,index:i,note})} onWeight={(i,weight)=>act("setWeight",{tableId:active.id,index:i,weight})} onClose={()=>setActiveId(null)}
+        onNote={(i,note)=>act("setNote",{tableId:active.id,index:i,note})} onWeight={(i,weight)=>act("setWeight",{tableId:active.id,index:i,weight})} onPrice={(i,price)=>act("setPrice",{tableId:active.id,index:i,price})} onClose={()=>setActiveId(null)}
         onPlace={()=>onPlace(active)} onBill={()=>onBill(active)} onPay={()=>setPayId(active.id)}
         onPreview={async()=>{const r=await act("preview",{tableId:active.id});if(r&&r.preview)setPreview({table:active.name,...r.preview});}}/>}
       {preview&&<PreviewModal data={preview} onClose={()=>setPreview(null)}/>}
@@ -340,7 +340,7 @@ function Prep({printer,receiptId,open,tables,floors,now}){
 }
 
 /* ---------- order screen (mobile-correct) ---------- */
-function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onWeight,onClose,onPlace,onBill,onPay,onPreview}){
+function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onWeight,onPrice,onClose,onPlace,onBill,onPay,onPreview}){
   const [cat,setCat]=useState("All");const [noteIdx,setNoteIdx]=useState(-1);const [noteVal,setNoteVal]=useState("");const [pane,setPane]=useState("menu");
   const cats=useMemo(()=>["All",...Array.from(new Set(menu.map((m)=>m.cat)))],[menu]);
   const shown=cat==="All"?menu:menu.filter((m)=>m.cat===cat);
@@ -348,15 +348,16 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onW
   const unsent=items.filter((x)=>!x.sent).length;const nItems=items.reduce((s,x)=>s+x.qty,0);
   const counts={};items.forEach((x)=>{if(!x.sent)counts[x.id]=(counts[x.id]||0)+x.qty;});
   const openNote=(i)=>{setNoteIdx(i);setNoteVal(items[i].note||"");};const saveNote=()=>{onNote(noteIdx,noteVal);setNoteIdx(-1);};
-  const [optProduct,setOptProduct]=useState(null);const [wtProduct,setWtProduct]=useState(null);
+  const [optProduct,setOptProduct]=useState(null);const [wtProduct,setWtProduct]=useState(null);const [amtProduct,setAmtProduct]=useState(null);
   const [wIdx,setWIdx]=useState(-1);const [wVal,setWVal]=useState("");
-  const openW=(i)=>{setWIdx(i);setWVal(String(items[i].weight||""));};const saveW=()=>{onWeight(wIdx,parseFloat(wVal)||0);setWIdx(-1);};
-  const pick=(m)=>{if(m.unit==="kg")setWtProduct(m);else if(m.options&&m.options.length)setOptProduct(m);else onAdd(m,null);};
+  const openW=(i)=>{setWIdx(i);setWVal(String(items[i].unit==="open"?items[i].price:(items[i].weight||"")));};
+  const saveW=()=>{const v=parseFloat(wVal)||0;if(items[wIdx].unit==="open")onPrice(wIdx,v);else onWeight(wIdx,v);setWIdx(-1);};
+  const pick=(m)=>{if(m.unit==="open")setAmtProduct(m);else if(m.unit==="kg")setWtProduct(m);else if(m.options&&m.options.length)setOptProduct(m);else onAdd(m,null);};
   const showMenu=!mob||pane==="menu";const showOrder=!mob||pane==="order";
   const MenuPane=(<div style={{flex:1,minWidth:0,overflowY:"auto",borderRight:mob?"none":`1px solid ${C.line}`,padding:12}}>
     <div className="flex wrap" style={{gap:6,marginBottom:12}}>{cats.map((c)=>{const cc=c==="All"?C.amber:catColor(c);const on=cat===c;return(<button key={c} onClick={()=>setCat(c)} style={{padding:"6px 12px",borderRadius:20,fontSize:12.5,cursor:"pointer",border:`1px solid ${on?cc:C.line}`,background:on?cc:"transparent",color:on?C.ink:C.mute,fontWeight:on?700:500}}>{c}</button>);})}</div>
     <div style={{display:"grid",gap:8,gridTemplateColumns:`repeat(auto-fill,minmax(${mob?104:118}px,1fr))`}}>{shown.map((m)=>{const n=counts[m.id]||0;return(<button key={m.id} className="tile" onClick={()=>pick(m)} style={{position:"relative",textAlign:"left",background:C.panel,borderRadius:10,border:`1px solid ${C.line}`,borderTop:`3px solid ${catColor(m.cat)}`,padding:"10px 11px",color:C.text,cursor:"pointer"}}>
-      <div style={{fontSize:13,fontWeight:600,lineHeight:1.25}}>{m.name}</div><div className="flex ac jb" style={{marginTop:8}}><span style={{fontFamily:MONO,color:C.amber,fontSize:13}}>{euro(m.price)}{m.unit==="kg"?"/kg":""}</span><span className="flex ac" style={{gap:4}}>{m.unit==="kg"&&<span style={{fontSize:8.5,fontWeight:800,color:C.blue}}>KG</span>}{m.options&&m.options.length>0&&<span style={{fontSize:8.5,fontWeight:800,color:C.violet}}>OPT</span>}<Dot pid={m.printerId}/></span></div>
+      <div style={{fontSize:13,fontWeight:600,lineHeight:1.25}}>{m.name}</div><div className="flex ac jb" style={{marginTop:8}}><span style={{fontFamily:MONO,color:C.amber,fontSize:13}}>{m.unit==="open"?"€ open":euro(m.price)+(m.unit==="kg"?"/kg":"")}</span><span className="flex ac" style={{gap:4}}>{m.unit==="kg"&&<span style={{fontSize:8.5,fontWeight:800,color:C.blue}}>KG</span>}{m.unit==="open"&&<span style={{fontSize:8.5,fontWeight:800,color:C.red}}>±€</span>}{m.options&&m.options.length>0&&<span style={{fontSize:8.5,fontWeight:800,color:C.violet}}>OPT</span>}<Dot pid={m.printerId}/></span></div>
       {n>0&&<span className="pop" style={{position:"absolute",top:-8,right:-8,minWidth:20,height:20,padding:"0 5px",borderRadius:10,background:C.amber,color:C.ink,fontSize:11,fontWeight:800,fontFamily:MONO,display:"grid",placeItems:"center"}}>{n}</span>}</button>);})}</div>
   </div>);
   const OrderPane=(<div style={{flex:1,minWidth:0,overflowY:"auto",padding:12}}>
@@ -365,8 +366,8 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onW
         <div className="flex ac" style={{gap:8}}><Dot pid={x.printerId}/>
           <div style={{flex:1,minWidth:0}}><div className="flex ac" style={{gap:6}}><span style={{fontSize:13.5,fontWeight:600}}>{x.name}</span>
             {x.sent?<span style={{fontSize:9,fontWeight:800,color:x.done?C.green:C.blue,border:`1px solid ${x.done?C.greenDim:C.blueDim}`,borderRadius:4,padding:"0 4px"}}>{x.done?"DONE":"SENT"}</span>:<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}{pq>0&&<span style={{fontSize:9,fontWeight:800,color:C.ink,background:C.green,borderRadius:4,padding:"1px 5px"}}>{pq>=x.qty?"PAID":`PAID ${pq}/${x.qty}`}</span>}</div>
-            <div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{x.unit==="kg"?`${euro(x.price)}/kg = ${euro(lineGross(x))}`:euro(x.price)} · {wname(x.waiterId)}</div></div>
-          {x.unit==="kg"?(wIdx===i?<span className="flex ac" style={{gap:4}}><input autoFocus type="number" step="0.05" inputMode="decimal" value={wVal} onChange={(e)=>setWVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveW();}} style={{...INP,width:60,fontSize:12,padding:"6px 8px"}}/><span style={{fontSize:11,color:C.mute}}>kg</span><button className="btn" onClick={saveW} style={{...QTY,width:30,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></span>:<button className="btn" onClick={()=>openW(i)} title="tap to set kilos" style={{...CHIP,background:C.panel2,color:C.text,border:`1px solid ${C.line}`,fontFamily:MONO,padding:"7px 10px"}}>{x.weight||0} kg</button>):<React.Fragment><button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button><span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span><button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></React.Fragment>}
+            <div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{x.unit==="kg"?`${euro(x.price)}/kg = ${euro(lineGross(x))}`:x.unit==="open"?(x.price<0?"Discount":"Extra charge"):euro(x.price)} · {wname(x.waiterId)}</div></div>
+          {(x.unit==="kg"||x.unit==="open")?(wIdx===i?<span className="flex ac" style={{gap:4}}><input autoFocus type="number" step={x.unit==="open"?"0.5":"0.05"} inputMode="decimal" value={wVal} onChange={(e)=>setWVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveW();}} style={{...INP,width:64,fontSize:12,padding:"6px 8px"}}/><span style={{fontSize:11,color:C.mute}}>{x.unit==="kg"?"kg":"€"}</span><button className="btn" onClick={saveW} style={{...QTY,width:30,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></span>:<button className="btn" onClick={()=>openW(i)} title="tap to edit" style={{...CHIP,background:C.panel2,color:x.unit==="open"&&x.price<0?C.red:C.text,border:`1px solid ${C.line}`,fontFamily:MONO,padding:"7px 10px"}}>{x.unit==="kg"?(x.weight||0)+" kg":euro(x.price)}</button>):<React.Fragment><button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button><span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span><button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></React.Fragment>}
           <button className="btn" onClick={()=>openNote(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="note" size={13} color={x.note?C.blue:C.mute}/></button>
           <button className="btn" onClick={()=>onRemove(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>
         {x.opts&&x.opts.length>0&&<div style={{fontSize:13,fontWeight:700,color:C.violet,marginLeft:16,marginTop:3}}>↳ {optsText(x)}</div>}
@@ -393,7 +394,23 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onW
   </div>
   {optProduct&&<OptionsModal product={optProduct} onCancel={()=>setOptProduct(null)} onConfirm={(opts)=>{onAdd(optProduct,opts);setOptProduct(null);}}/>}
   {wtProduct&&<WeightModal product={wtProduct} onCancel={()=>setWtProduct(null)} onConfirm={(w)=>{onAdd(wtProduct,null,w);setWtProduct(null);}}/>}
+  {amtProduct&&<AmountModal product={amtProduct} onCancel={()=>setAmtProduct(null)} onConfirm={(a)=>{onAdd(amtProduct,null,null,a);setAmtProduct(null);}}/>}
   </Overlay>);
+}
+
+/* ---------- amount picker (open price: charge / discount) ---------- */
+function AmountModal({product,onCancel,onConfirm}){
+  const [amt,setAmt]=useState("");const [sign,setSign]=useState(1);
+  const val=round2((parseFloat(amt)||0)*sign);
+  return(<Overlay center onBackdrop={onCancel}><div style={{background:C.panel,borderRadius:16,padding:18,width:"100%",maxWidth:340,border:`1px solid ${C.line}`}}>
+    <div className="flex ac jb"><span style={{fontWeight:800,fontSize:16}}>{product.name}</span><button className="btn" onClick={onCancel} style={{...ICON,cursor:"pointer"}}><Ico n="x" size={18} color={C.mute}/></button></div>
+    <div className="flex" style={{gap:8,margin:"12px 0"}}>
+      <button className="btn" onClick={()=>setSign(1)} style={{flex:1,padding:"10px 0",borderRadius:10,border:`1px solid ${sign>0?C.amber:C.line}`,background:sign>0?C.amber:C.panel3,color:sign>0?C.ink:C.text,fontWeight:800,fontSize:13,cursor:"pointer"}}>Extra charge (+)</button>
+      <button className="btn" onClick={()=>setSign(-1)} style={{flex:1,padding:"10px 0",borderRadius:10,border:`1px solid ${sign<0?C.red:C.line}`,background:sign<0?C.red:C.panel3,color:sign<0?C.ink:C.text,fontWeight:800,fontSize:13,cursor:"pointer"}}>Discount (−)</button></div>
+    <div className="flex ac" style={{gap:8,marginBottom:14}}><span style={{fontFamily:MONO,color:C.mute}}>€</span><input autoFocus type="number" step="0.5" inputMode="decimal" value={amt} onChange={(e)=>setAmt(e.target.value)} placeholder="0.00" style={{...INP,flex:1,fontFamily:MONO,fontSize:20,textAlign:"center"}}/></div>
+    <div className="flex ac jb" style={{marginBottom:14}}><span style={{color:C.mute,fontSize:12.5}}>Adds to bill</span><span style={{fontFamily:MONO,fontWeight:800,color:val<0?C.red:C.amber,fontSize:20}}>{val<0?"−":""}{euro(Math.abs(val))}</span></div>
+    <button className="btn" onClick={()=>{if(val!==0)onConfirm(val);}} disabled={val===0} style={{...BIG,width:"100%",justifyContent:"center",background:val!==0?C.amber:C.panel2,color:val!==0?C.ink:C.subtle,border:"none",fontWeight:800,cursor:val!==0?"pointer":"default"}}><Ico n="plus" size={16} color={val!==0?C.ink:C.subtle}/> Add to order</button>
+  </div></Overlay>);
 }
 
 /* ---------- weight picker (kg products) ---------- */
@@ -554,11 +571,11 @@ function Reports({sales,waiters}){
     list.forEach((s)=>{
       s.items.forEach((it)=>{const g=lineGross(it);const r=it.vat!=null?it.vat:0;const n=g/(1+r/100);net+=n;vat+=g-n;
         const e=rate[r]||{rate:r,gross:0,net:0,vat:0};e.gross+=g;e.net+=n;e.vat+=g-n;rate[r]=e;
-        const pe=prod[it.name]||{name:it.name,qty:0,rev:0};pe.qty+=it.qty;pe.rev+=g;prod[it.name]=pe;});
+        const pe=prod[it.name]||{name:it.name,unit:it.unit||"each",qty:0,kg:0,rev:0};if(it.unit==="kg")pe.kg+=(it.weight||0)*(it.qty||1);else pe.qty+=it.qty;pe.rev+=g;prod[it.name]=pe;});
       const wn=(waiters.find((w)=>w.id===s.waiterId)||{}).name||"—";wmap[wn]=wmap[wn]||{name:wn,gross:0,tx:0};wmap[wn].gross+=s.total;wmap[wn].tx+=1;
       const ps=s.payments&&s.payments.length?s.payments:[{amount:s.total,method:s.method}];ps.forEach((p)=>{pay[p.method==="card"?"card":"cash"]+=p.amount;});
     });
-    return {net:round2(net),vat:round2(vat),rates:Object.values(rate).sort((a,b)=>a.rate-b.rate),products:Object.values(prod).sort((a,b)=>b.qty-a.qty||b.rev-a.rev),waiterRows:Object.values(wmap).sort((a,b)=>b.gross-a.gross),cash:round2(pay.cash),card:round2(pay.card)};
+    return {net:round2(net),vat:round2(vat),rates:Object.values(rate).sort((a,b)=>a.rate-b.rate),products:Object.values(prod).sort((a,b)=>b.rev-a.rev),waiterRows:Object.values(wmap).sort((a,b)=>b.gross-a.gross),cash:round2(pay.cash),card:round2(pay.card)};
   },[list,waiters]);
   const setRange=(f,t)=>{setFrom(f);setTo(t);};
   const yday=()=>bizDay(Date.now()-24*3600000);
@@ -581,7 +598,7 @@ function Reports({sales,waiters}){
       <Panel title="By payment type"><KV k="Cash" v={euro(agg.cash)}/><KV k="Card / POS" v={euro(agg.card)}/></Panel>
       <Panel title="VAT breakdown">{agg.rates.length===0?<Muted2>No sales.</Muted2>:agg.rates.map((r)=>(<div key={r.rate} style={{marginBottom:10}}><div style={{fontWeight:700,fontSize:13,marginBottom:2,color:C.amber}}>VAT {r.rate}%</div><KV k="Gross" v={euro(round2(r.gross))}/><KV k="Net" v={euro(round2(r.net))}/><KV k="VAT" v={euro(round2(r.vat))}/></div>))}</Panel>
       <Panel title="By waiter">{agg.waiterRows.length===0?<Muted2>No sales.</Muted2>:agg.waiterRows.map((w)=>(<KV key={w.name} k={`${w.name} · ${w.tx} tx`} v={euro(round2(w.gross))}/>))}</Panel>
-      <Panel title="Products sold">{agg.products.length===0?<Muted2>No sales.</Muted2>:agg.products.map((p)=>(<KV key={p.name} k={`${p.qty}× ${p.name}`} v={euro(round2(p.rev))}/>))}</Panel>
+      <Panel title="Products sold">{agg.products.length===0?<Muted2>No sales.</Muted2>:agg.products.map((p)=>(<KV key={p.name} k={`${p.unit==="kg"?round2(p.kg)+" kg":p.qty+"×"} ${p.name}`} v={euro(round2(p.rev))}/>))}</Panel>
     </div>
     <div style={{marginTop:18}}>
       <div className="flex ac jb" style={{marginBottom:8}}><Title>Paid orders</Title><span style={{fontSize:12,color:C.mute,fontFamily:MONO}}>{list.length} ticket{list.length===1?"":"s"}</span></div>
@@ -642,7 +659,7 @@ function Setup({state,mob}){
         <div className="flex" style={{gap:8}}><input placeholder="Price" type="number" value={pP} onChange={(e)=>setPP(e.target.value)} style={{...INP,flex:1}}/><input placeholder="Category" value={pC} onChange={(e)=>setPC(e.target.value)} style={{...INP,flex:1}}/></div>
         <div className="flex" style={{gap:8}}><select value={pPr} onChange={(e)=>setPPr(e.target.value)} style={{...INP,flex:1}}><option value="">→ No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>→ {p.name}</option>)}</select>
           <select value={pVat} onChange={(e)=>setPVat(e.target.value)} title="VAT rate" style={{...INP,width:92}}>{[0,6,13,24].map((v)=><option key={v} value={v}>VAT {v}%</option>)}</select>
-          <select value={pUnit} onChange={(e)=>setPUnit(e.target.value)} title="sold per item or per kilo" style={{...INP,width:96}}><option value="each">Per item</option><option value="kg">Per kg</option></select>
+          <select value={pUnit} onChange={(e)=>setPUnit(e.target.value)} title="how it's charged" style={{...INP,width:104}}><option value="each">Per item</option><option value="kg">Per kg</option><option value="open">Open price</option></select>
           <button className="btn" onClick={()=>{if(pN&&pP){act("addProduct",{name:pN,price:parseFloat(pP),cat:pC,printerId:pPr,vat:parseInt(pVat),unit:pUnit});setPN("");setPP("");}}} style={{display:"flex",alignItems:"center",gap:6,...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add</button></div>
       </div>
       <div style={{display:"grid",gap:6}}>
@@ -650,7 +667,7 @@ function Setup({state,mob}){
           <span style={{flex:1,fontSize:13}}>{m.name}{!m.printerId&&<span title="No printer — this won't print or show on any Kitchen/Bar screen" style={{marginLeft:8,fontSize:9,fontWeight:800,color:C.red,border:`1px solid ${C.red}`,borderRadius:4,padding:"0 4px"}}>NO STATION</span>}</span>
           <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:80}}><option value="">No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
           <select value={m.vat!=null?m.vat:13} onChange={(e)=>act("updateProduct",{id:m.id,patch:{vat:parseInt(e.target.value)}})} title="VAT" style={{...INP,padding:"4px 4px",fontSize:11.5,width:56}}>{[0,6,13,24].map((v)=><option key={v} value={v}>{v}%</option>)}</select>
-          <select value={m.unit||"each"} onChange={(e)=>act("updateProduct",{id:m.id,patch:{unit:e.target.value}})} title="per item / per kg" style={{...INP,padding:"4px 4px",fontSize:11.5,width:64}}><option value="each">item</option><option value="kg">kg</option></select>
+          <select value={m.unit||"each"} onChange={(e)=>act("updateProduct",{id:m.id,patch:{unit:e.target.value}})} title="per item / per kg / open price" style={{...INP,padding:"4px 4px",fontSize:11.5,width:72}}><option value="each">item</option><option value="kg">kg</option><option value="open">open</option></select>
           <span style={{fontFamily:MONO,color:C.amber,fontSize:13,width:50,textAlign:"right"}}>{euro(m.price)}</span>
           <button className="btn" onClick={()=>setOptProd(m)} title="Choices / extras (e.g. sugar, milk)" style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="sliders" size={13} color={m.options&&m.options.length?C.violet:C.mute}/></button>
           <button className="btn" onClick={()=>act("deleteProduct",{id:m.id})} style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>);

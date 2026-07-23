@@ -25,7 +25,7 @@ const PUBLIC = path.join(__dirname, "public");
 const uid = () => Math.random().toString(36).slice(2, 9);
 const round2 = (n) => Math.round(n * 100) / 100;
 const itemGross = (it) => round2((it.unit === "kg" ? it.price * (it.weight || 0) : it.price) * (it.qty || 1));
-const qtyStr = (it) => it.unit === "kg" ? `${it.weight || 0} kg` : `${it.qty} x`;
+const qtyStr = (it) => it.unit === "kg" ? `${it.weight || 0} kg` : it.unit === "open" ? "" : `${it.qty} x`;
 
 /* ---------------- seed ---------------- */
 const SEED = {
@@ -67,6 +67,7 @@ const SEED = {
     { id: "m13", name: "Pasta Carbonara", price: 10.5, cat: "Food", printerId: "pk" },
     { id: "m14", name: "Cheesecake", price: 5.5, cat: "Dessert", printerId: "pb" },
     { id: "m15", name: "Baklava", price: 4.5, cat: "Dessert", printerId: "pb" },
+    { id: "adj", name: "Charge / Discount", price: 0, cat: "Other", printerId: "", vat: 0, unit: "open" },
   ],
   waiters: [
     { id: "w0", name: "Manager", color: "#C98FE8", role: "admin", pin: "1234" },
@@ -171,8 +172,8 @@ function buildTicket({ title, table, servedBy, items, total, payments, priced, w
   if (servedBy) p.push(L("Served by " + servedBy));
   p.push(L(new Date().toLocaleString()), B(CP.left), L("-".repeat(W)));
   for (const it of items) {
-    if (priced) p.push(col(`${qtyStr(it)} ${it.name}`, "EUR " + itemGross(it).toFixed(2)));
-    else p.push(B(CP.boldOn), L(`${qtyStr(it)} ${it.name}`), B(CP.boldOff));
+    if (priced) p.push(col(`${(qtyStr(it)+" "+it.name).trim()}`, "EUR " + itemGross(it).toFixed(2)));
+    else p.push(B(CP.boldOn), L(`${(qtyStr(it)+" "+it.name).trim()}`), B(CP.boldOff));
     if (it.opts && it.opts.length) p.push(L("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / ")));
     if (it.note) p.push(L("   >> " + it.note));
   }
@@ -199,7 +200,7 @@ function ticketText({ title, table, servedBy, items, total, payments, priced, wi
   if (servedBy) out.push("Served by " + servedBy);
   out.push(new Date().toLocaleString(), line);
   for (const it of items) {
-    out.push(priced ? col(`${qtyStr(it)} ${it.name}`, "EUR " + itemGross(it).toFixed(2)) : `${qtyStr(it)} ${it.name}`);
+    out.push(priced ? col(`${(qtyStr(it)+" "+it.name).trim()}`, "EUR " + itemGross(it).toFixed(2)) : `${(qtyStr(it)+" "+it.name).trim()}`);
     if (it.opts && it.opts.length) out.push("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / "));
     if (it.note) out.push("   >> " + it.note);
   }
@@ -252,13 +253,14 @@ async function handleAction(type, payload = {}, waiterId) {
   switch (type) {
     case "addItem": {
       const o = state.open[p.tableId] || { items: [], openedAt: new Date().toISOString(), openedBy: waiterId, payments: [] };
-      const noMerge = (p.item.opts && p.item.opts.length) || p.item.unit === "kg";
-      const i = noMerge ? -1 : o.items.findIndex((x) => x.id === p.item.id && !x.sent && !(x.opts && x.opts.length) && x.unit !== "kg");
+      const noMerge = (p.item.opts && p.item.opts.length) || p.item.unit === "kg" || p.item.unit === "open";
+      const i = noMerge ? -1 : o.items.findIndex((x) => x.id === p.item.id && !x.sent && !(x.opts && x.opts.length) && x.unit !== "kg" && x.unit !== "open");
       if (i >= 0) o.items[i].qty += 1;
       else o.items.push({ ...p.item, unit: p.item.unit || "each", weight: p.item.weight || 0, opts: p.item.opts || null, lid: uid(), qty: 1, waiterId, sent: false, done: false, doneQty: 0, note: "" });
       state.open[p.tableId] = o; break;
     }
     case "setWeight": { const o = state.open[p.tableId]; if (o && o.items[p.index]) o.items[p.index].weight = Math.max(0, parseFloat(p.weight) || 0); break; }
+    case "setPrice": { const o = state.open[p.tableId]; if (o && o.items[p.index]) o.items[p.index].price = round2(parseFloat(p.price) || 0); break; }
     case "changeQty": { const o = state.open[p.tableId]; if (!o) break; const it = o.items[p.index]; if (it) { it.qty += p.delta; it.doneQty = Math.min(it.doneQty || 0, Math.max(0, it.qty)); it.done = it.qty > 0 && it.doneQty >= it.qty; } o.items = o.items.filter((x) => x.qty > 0); if (!o.items.length) delete state.open[p.tableId]; break; }
     case "removeItem": { const o = state.open[p.tableId]; if (!o) break; o.items.splice(p.index, 1); if (!o.items.length) delete state.open[p.tableId]; break; }
     case "setNote": { const o = state.open[p.tableId]; if (o && o.items[p.index]) o.items[p.index].note = p.note; break; }
@@ -312,7 +314,7 @@ async function handleAction(type, payload = {}, waiterId) {
     case "deleteTable": state.tables = state.tables.filter((t) => t.id !== p.id); break;
     case "addFloor": state.floors.push({ id: uid(), name: p.name }); break;
     case "deleteFloor": if (state.floors.length > 1) { state.floors = state.floors.filter((f) => f.id !== p.id); state.tables = state.tables.filter((t) => t.floorId !== p.id); } break;
-    case "addProduct": state.menu.push({ id: uid(), name: p.name, price: p.price, cat: p.cat, printerId: p.printerId || "", vat: p.vat != null ? p.vat : 13, unit: p.unit === "kg" ? "kg" : "each" }); break;
+    case "addProduct": state.menu.push({ id: uid(), name: p.name, price: p.price, cat: p.cat, printerId: p.printerId || "", vat: p.vat != null ? p.vat : 13, unit: p.unit === "kg" ? "kg" : (p.unit === "open" ? "open" : "each") }); break;
     case "updateProduct": { const m = state.menu.find((x) => x.id === p.id); if (m) Object.assign(m, p.patch || {}); break; }
     case "deleteProduct": state.menu = state.menu.filter((m) => m.id !== p.id); break;
     case "addPrinter": state.printers.push({ id: uid(), name: p.name || "Printer", ip: p.ip || "", color: p.color || "#E8A23D" }); break;
