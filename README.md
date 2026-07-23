@@ -19,6 +19,28 @@ Handy behaviours: pressing **Send order** fires silently and drops you back on t
 **Item choices (modifiers):** give any product questions like *Sugar: Sketos/Metrios/Glykos* or *Milk: yes/no* under **Setup → Menu → the sliders icon**. When a waiter taps that product it asks the questions, and the answers show on the order, the kitchen/bar ticket and the receipt. (The demo coffees already have sugar/milk choices.)
 
 ## Run it
+> **First unzip the folder!** Don't run anything from inside the `.zip`. On Windows: right-click `kafeneio-pos.zip`
+> → **Extract All…**. On Mac: double-click the zip. Then open the launcher from the **extracted folder**.
+
+**Easiest — just double-click (no typing):**
+- **Windows:** double-click **`PDA.bat`**
+- **Mac:** double-click **`PDA (Mac).command`** (first time: right-click → Open, to get past the security prompt)
+- **Linux:** run **`PDA (Linux).sh`**
+
+A small window opens (leave it open while the shop is running) and your **browser opens the app automatically**. To
+stop, close that window. You still need **Node.js** installed once — the launcher will tell you and link to
+https://nodejs.org if it's missing.
+
+**Windows makes the pretty icon for you:** the first time you run `PDA.bat`, it automatically drops a **“PDA” icon
+(coffee cup) on your Desktop**. From then on, the shop just double-clicks that Desktop icon — no folders, no typing.
+
+**On the tablet/phone:** open the address in the browser, then use *Add to Home screen* — it installs with the same
+coffee-cup icon and opens full-screen like a real app.
+
+The launcher works from **any location** — it always uses its own folder, so move the extracted `kafeneio-pos` folder
+wherever you like (Desktop, `C:\KafeneioPOS`, a USB stick…) and it still runs.
+
+**Or from a terminal:**
 1. Install **Node.js 18+** — https://nodejs.org
 2. In this folder, run:
    ```
@@ -31,7 +53,26 @@ Handy behaviours: pressing **Send order** fires silently and drops you back on t
    ```
 4. Open the shop address on the tablet **and** on each waiter's phone. That's it — they're all connected.
 
+(To stop the browser from opening automatically, start with `NO_OPEN=1`.)
+
 Data is saved to `data.json` in this folder. Delete it (or use *Setup → Reset*) to start fresh.
+
+## Where to run it (PC, mini-PC, Raspberry Pi… or an Android tablet)
+There are two roles: **one device runs the server** (`node server.js`) and holds the shared data; **all the other
+devices are just browsers** pointing at it. They must be on the **same Wi-Fi/network**.
+
+- **Clients — any browser.** Android tablets, iPads, phones and PCs all work as terminals: open `http://<server-ip>:3000`.
+  Nothing to install on them. Add it to the home screen for an app-like feel.
+- **Server — easiest on a computer.** Windows, macOS or Linux with Node.js. For an always-on shop setup, a cheap
+  mini-PC or a **Raspberry Pi** left running is ideal (low power, silent). Whatever runs the server should stay on
+  while you're open, and ideally have a fixed local IP.
+- **Server on an Android tablet (advanced, no PC needed).** Install the **Termux** app, then inside it run
+  `pkg install nodejs`, copy this folder over, and `node server.js`. That same tablet can also be a client (open
+  `http://localhost:3000`). It works, but a tablet is fussier than a small always-on PC/Pi, so use this only if you
+  don't want a separate machine.
+
+Recommended shop setup: one always-on **mini-PC or Raspberry Pi** as the server, and **Android tablets + phones** as
+the terminals.
 
 ## Printers
 In **Setup → Printers** (admin): add a printer with a name and its IP address, mark one as **Bill** (the customer

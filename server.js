@@ -371,7 +371,7 @@ async function handleAction(type, payload = {}, waiterId) {
 
 /* ---------------- http ---------------- */
 function serveStatic(res, file) {
-  const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" }[path.extname(file)] || "text/plain";
+  const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".ico": "image/x-icon", ".svg": "image/svg+xml", ".json": "application/json", ".webmanifest": "application/manifest+json" }[path.extname(file)] || "text/plain";
   fs.readFile(file, (err, data) => { if (err) { res.writeHead(404); res.end("Not found"); } else { res.writeHead(200, { "Content-Type": mime }); res.end(data); } });
 }
 const server = http.createServer(async (req, res) => {
@@ -406,4 +406,14 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log("  On this computer:      http://localhost:" + PORT);
   ips.forEach((ip) => console.log("  On phones (same Wi-Fi): http://" + ip + ":" + PORT));
   console.log("\n  Log in as Manager for full access; waiters see only ordering.\n");
+  console.log("  (Leave this window open while the shop is running.)\n");
+  if (process.env.NO_OPEN !== "1") {                       // auto-open the browser on the shop device
+    const url = "http://localhost:" + PORT;
+    try {
+      const { spawn } = require("child_process");
+      const cmd = process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
+      const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+      spawn(cmd, args, { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+    } catch {}
+  }
 });
