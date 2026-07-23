@@ -12,3 +12,7 @@ yarn-error.log*
 .vscode/
 .idea/
 *.swp
+backups/
+data.db
+data.db-wal
+data.db-shm

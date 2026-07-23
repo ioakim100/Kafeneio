@@ -57,6 +57,19 @@ wherever you like (Desktop, `C:\KafeneioPOS`, a USB stick…) and it still runs.
 
 Data is saved to `data.json` in this folder. Delete it (or use *Setup → Reset*) to start fresh.
 
+## Backups (so a dead computer never loses your data)
+Everything lives in one file (`data.json`) and the app keeps working **with no internet** — the backups just ride
+along. In **Setup → Backup & restore** (admin):
+- **Automatic backups** run while the app is open (default every 10 min) and on shutdown. Local copies are kept in the
+  app's `backups/` folder, and the **last backup time** is shown with a green/red dot.
+- **Cloud / off-machine folder:** paste the path of a **Dropbox / Google Drive / OneDrive** folder (or a USB / network
+  drive). The app writes a snapshot there too; your cloud app uploads it when there's internet, and if there isn't, it
+  waits and syncs later. This is what protects you if the computer dies.
+- **Back up now** forces one immediately. **Restore…** lists every snapshot (cloud folder + local) — pick one to load.
+- **Dead computer?** Install the app on a new one, set the **same** cloud folder, open **Restore…**, pick the latest —
+  you're exactly where you left off. (If you copy the whole app folder including `backups/`, it even auto-restores on
+  first start.)
+
 ## Where to run it (PC, mini-PC, Raspberry Pi… or an Android tablet)
 There are two roles: **one device runs the server** (`node server.js`) and holds the shared data; **all the other
 devices are just browsers** pointing at it. They must be on the **same Wi-Fi/network**.

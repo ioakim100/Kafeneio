@@ -20,7 +20,10 @@ const os = require("os");
 const path = require("path");
 
 const PORT = process.env.PORT || 3000;
+const _emitWarning = process.emitWarning.bind(process);
+process.emitWarning = (w, ...a) => { const s = (w && w.message) || String(w); if (/SQLite is an experimental/i.test(s)) return; return _emitWarning(w, ...a); };
 const DATA_FILE = path.join(__dirname, "data.json");
+const BACKUP_DIR = path.join(__dirname, "backups");
 const PUBLIC = path.join(__dirname, "public");
 const uid = () => Math.random().toString(36).slice(2, 9);
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -75,17 +78,66 @@ const SEED = {
     { id: "w2", name: "Nikos", color: "#7BC49A", role: "waiter", pin: "2222" },
   ],
   shop: { name: "Kafeneío", vat: "", taxOffice: "", address: "", phone: "", dayStart: 5 },
-  settings: { autoPrintPrep: true, autoPrintReceipt: true, lockToOpener: false },
+  settings: { autoPrintPrep: true, autoPrintReceipt: true, lockToOpener: false, autoBackup: true, backupIntervalMin: 10, backupDir: "" },
+  meta: { lastBackupAt: null, lastBackupOk: true, lastBackupMsg: "" },
   open: {},
   sales: [],
 };
 
-/* ---------------- load + migrate ---------------- */
+/* ---------------- storage: SQLite (built-in) with JSON fallback ---------------- */
+const DB_FILE = path.join(__dirname, "data.db");
+let db = null, useSqlite = false;
+try {
+  const { DatabaseSync } = require("node:sqlite");
+  db = new DatabaseSync(DB_FILE);
+  db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+  db.exec("CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);");
+  db.exec("CREATE TABLE IF NOT EXISTS sales(id TEXT PRIMARY KEY, closedAt TEXT, waiterId TEXT, total REAL, data TEXT);");
+  useSqlite = true;
+} catch (e) {
+  console.log("  (node:sqlite unavailable — falling back to a JSON file. Node 22.5+ / 24+ recommended.)");
+}
+
 let state;
-try { state = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } catch { state = null; }
-if (!state) { state = JSON.parse(JSON.stringify(SEED)); }
-migrate();
-save();
+let dirty = false;
+
+const cfgFromState = () => { const { sales, ...cfg } = state; return cfg; };
+function persistConfig() {
+  if (useSqlite) { try { db.prepare("INSERT INTO kv(k,v) VALUES('config',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(JSON.stringify(cfgFromState())); } catch (e) { console.error("db config save failed", e); } }
+  else { try { fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2)); } catch (e) { console.error("save failed", e); } }
+}
+function insertSale(s) { if (useSqlite) { try { db.prepare("INSERT OR REPLACE INTO sales(id,closedAt,waiterId,total,data) VALUES(?,?,?,?,?)").run(s.id, s.closedAt || "", s.waiterId || "", s.total || 0, JSON.stringify(s)); } catch (e) { console.error("db sale save failed", e); } } }
+function replaceSales(arr) {
+  if (!useSqlite) return;
+  try { db.exec("BEGIN"); db.exec("DELETE FROM sales"); const st = db.prepare("INSERT OR REPLACE INTO sales(id,closedAt,waiterId,total,data) VALUES(?,?,?,?,?)");
+    for (const s of (arr || [])) st.run(s.id, s.closedAt || "", s.waiterId || "", s.total || 0, JSON.stringify(s)); db.exec("COMMIT"); }
+  catch (e) { try { db.exec("ROLLBACK"); } catch {} console.error("db sales replace failed", e); }
+}
+function loadSales() { if (!useSqlite) return state && state.sales ? state.sales : []; try { return db.prepare("SELECT data FROM sales ORDER BY closedAt DESC").all().map((r) => JSON.parse(r.data)); } catch { return []; } }
+function applyFullState(data) {
+  if (!data || !Array.isArray(data.tables) || !Array.isArray(data.menu)) throw new Error("not a valid backup file");
+  state = { ...data, sales: Array.isArray(data.sales) ? data.sales : [] };
+  migrate();
+  if (useSqlite) { replaceSales(state.sales); persistConfig(); } else { save(); }
+  broadcast();
+}
+
+/* ---------------- load + migrate ---------------- */
+function boot() {
+  let raw = null, salesFromDb = null, source = "seed";
+  if (useSqlite) {
+    try { const row = db.prepare("SELECT v FROM kv WHERE k='config'").get(); if (row) { raw = JSON.parse(row.v); source = "db"; } } catch {}
+    if (raw) salesFromDb = loadSales();
+  }
+  if (!raw) { try { if (fs.existsSync(DATA_FILE)) { raw = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); source = "legacy-json"; } } catch {} }
+  if (!raw) { try { const p = path.join(BACKUP_DIR, "latest.json"); if (fs.existsSync(p)) { raw = JSON.parse(fs.readFileSync(p, "utf8")); source = "backup"; } } catch {} }
+  if (!raw) { raw = JSON.parse(JSON.stringify(SEED)); source = "seed"; }
+  state = { ...raw, sales: salesFromDb || (Array.isArray(raw.sales) ? raw.sales : []) };
+  migrate();
+  if (useSqlite) { if (source !== "db") replaceSales(state.sales); persistConfig(); } else { save(); }
+  console.log("  storage: " + (useSqlite ? "SQLite (" + source + ")" : "JSON file"));
+}
+boot();
 
 function migrate() {
   for (const k of Object.keys(SEED)) if (state[k] === undefined) state[k] = SEED[k];
@@ -106,6 +158,11 @@ function migrate() {
     state.receiptPrinterId = r.id;
   }
   if (state.shop && state.shop.dayStart === undefined) state.shop.dayStart = 5;
+  state.settings = state.settings || {};
+  if (state.settings.autoBackup === undefined) state.settings.autoBackup = true;
+  if (state.settings.backupIntervalMin === undefined) state.settings.backupIntervalMin = 10;
+  if (state.settings.backupDir === undefined) state.settings.backupDir = "";
+  state.meta = state.meta || { lastBackupAt: null, lastBackupOk: true, lastBackupMsg: "" };
   state.printers.forEach((p) => {
     if (p.mode === undefined) p.mode = p.all ? "all" : (/bar/i.test(p.name) ? "rest" : "own");
     if (p.food === undefined) p.food = /kitchen/i.test(p.name);
@@ -135,7 +192,44 @@ function migrate() {
   }));
 }
 
-function save() { try { fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2)); } catch (e) { console.error("save failed", e); } }
+function save() { dirty = true; persistConfig(); }
+/* ---------------- backups (offline-first) ---------------- */
+function ensureDir(d) { try { fs.mkdirSync(d, { recursive: true }); } catch {} }
+function pruneLocal(keep = 60) {
+  try { const f = fs.readdirSync(BACKUP_DIR).filter((x) => /^kafeneio-.*\.json$/.test(x)).sort();
+    for (let i = 0; i < f.length - keep; i++) try { fs.unlinkSync(path.join(BACKUP_DIR, f[i])); } catch {} } catch {}
+}
+function writeSnapshot(reason) {
+  const json = JSON.stringify(state);
+  const now = new Date();
+  const ts = now.toISOString().replace(/:/g, "-").replace("T", "_").slice(0, 19);
+  let ok = true, msg = "";
+  try { ensureDir(BACKUP_DIR); fs.writeFileSync(path.join(BACKUP_DIR, `kafeneio-${ts}.json`), json); fs.writeFileSync(path.join(BACKUP_DIR, "latest.json"), json); pruneLocal(); }
+  catch (e) { ok = false; msg = "local: " + e.message; }
+  const dir = state.settings && state.settings.backupDir;
+  if (dir) {
+    try { ensureDir(dir); const day = now.toISOString().slice(0, 10);
+      fs.writeFileSync(path.join(dir, "kafeneio-latest.json"), json);
+      fs.writeFileSync(path.join(dir, `kafeneio-${day}.json`), json); }
+    catch (e) { ok = false; msg = (msg ? msg + "; " : "") + "folder: " + e.message; }
+  }
+  state.meta = { lastBackupAt: now.toISOString(), lastBackupOk: ok, lastBackupMsg: msg, reason: reason || "" };
+  persistConfig();
+  dirty = false; broadcast();
+  return { ok, msg, at: state.meta.lastBackupAt };
+}
+function listBackups() {
+  const out = [];
+  const scan = (dir, source) => { try { for (const f of fs.readdirSync(dir)) { if (!/\.json$/.test(f)) continue; const st = fs.statSync(path.join(dir, f)); out.push({ name: f, source, dir, size: st.size, at: st.mtime.toISOString() }); } } catch {} };
+  scan(BACKUP_DIR, "local");
+  if (state.settings && state.settings.backupDir) scan(state.settings.backupDir, "folder");
+  out.sort((a, b) => b.at.localeCompare(a.at));
+  return out.slice(0, 120);
+}
+function restoreFromFile(dir, name) {
+  const data = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+  applyFullState(data);
+}
 const orderTotal = (o) => round2((o.items || []).reduce((s, x) => s + itemGross(x), 0));
 const waiterName = (id) => (state.waiters.find((w) => w.id === id) || {}).name || "—";
 const printerById = (id) => state.printers.find((p) => p.id === id);
@@ -240,7 +334,8 @@ async function printReceipt(sale) {
 /* ---------------- actions ---------------- */
 const ADMIN = new Set(["addProduct", "deleteProduct", "addFloor", "deleteFloor", "addTable", "deleteTable",
   "updateTable", "moveTable", "addPrinter", "updatePrinter", "deletePrinter", "setReceiptPrinter",
-  "addWaiter", "updateWaiter", "deleteWaiter", "reset", "setShop", "setSetting", "seedDemoSales"]);
+  "addWaiter", "updateWaiter", "deleteWaiter", "reset", "setShop", "setSetting", "seedDemoSales",
+  "setBackup", "backupNow", "listBackups", "restoreBackup", "importData"]);
 
 async function handleAction(type, payload = {}, waiterId) {
   const actor = state.waiters.find((w) => w.id === waiterId);
@@ -304,6 +399,7 @@ async function handleAction(type, payload = {}, waiterId) {
         sale = { id: uid(), tableId: p.tableId, tableName: t?.name || "?", items: o.items, total, payments: o.payments,
           method: methods.length > 1 ? "split" : methods[0], waiterId: o.openedBy || waiterId, closedAt: new Date().toISOString() };
         state.sales.unshift(sale);
+        insertSale(sale);
         delete state.open[p.tableId];
         print = state.settings.autoPrintReceipt ? await printReceipt(sale) : { ok: false, reason: "off" };
       }
@@ -324,6 +420,11 @@ async function handleAction(type, payload = {}, waiterId) {
     case "setReceiptPrinter": state.receiptPrinterId = p.id; break;
     case "setShop": state.shop = { ...state.shop, ...p }; break;
     case "setSetting": state.settings = { ...state.settings, ...p }; break;
+    case "setBackup": state.settings = { ...state.settings, ...(p || {}) }; break;
+    case "backupNow": return { ok: true, backup: writeSnapshot("manual") };
+    case "listBackups": return { ok: true, backups: listBackups() };
+    case "restoreBackup": { try { restoreFromFile(p.dir, p.name); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } }
+    case "importData": { try { applyFullState(p.data); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } }
     case "seedDemoSales": {
       const menu = state.menu.length ? state.menu : [{ id: "d", name: "Coffee", price: 2, vat: 13, printerId: "pb" }];
       const ws = state.waiters.length ? state.waiters : [{ id: "w0" }];
@@ -341,6 +442,7 @@ async function handleAction(type, payload = {}, waiterId) {
         }
       }
       state.sales = out.concat(state.sales);
+      replaceSales(state.sales);
       break;
     }
     case "preview": {
@@ -363,7 +465,7 @@ async function handleAction(type, payload = {}, waiterId) {
     case "addWaiter": state.waiters.push({ id: uid(), name: p.name, color: p.color || "#E8A23D", role: ["admin", "manager", "waiter", "kitchen"].includes(p.role) ? p.role : "waiter", pin: p.pin || "" }); break;
     case "updateWaiter": { const w = state.waiters.find((x) => x.id === p.id); if (w) Object.assign(w, p.patch || {}); break; }
     case "deleteWaiter": state.waiters = state.waiters.filter((w) => w.id !== p.id); break;
-    case "reset": state = JSON.parse(JSON.stringify(SEED)); break;
+    case "reset": state = JSON.parse(JSON.stringify(SEED)); migrate(); replaceSales(state.sales); break;
   }
   save(); broadcast();
   return { ok: true, print, sale };
@@ -377,6 +479,10 @@ function serveStatic(res, file) {
 const server = http.createServer(async (req, res) => {
   const url = req.url.split("?")[0];
   if (url === "/api/state") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify(publicState())); }
+  if (url === "/api/export") {
+    res.writeHead(200, { "Content-Type": "application/json", "Content-Disposition": 'attachment; filename="kafeneio-data-' + new Date().toISOString().slice(0, 10) + '.json"' });
+    return res.end(JSON.stringify(state, null, 2));
+  }
   if (url === "/api/events") {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
     res.write("data: " + JSON.stringify(publicState()) + "\n\n"); clients.add(res); req.on("close", () => clients.delete(res)); return;
@@ -407,6 +513,13 @@ server.listen(PORT, "0.0.0.0", () => {
   ips.forEach((ip) => console.log("  On phones (same Wi-Fi): http://" + ip + ":" + PORT));
   console.log("\n  Log in as Manager for full access; waiters see only ordering.\n");
   console.log("  (Leave this window open while the shop is running.)\n");
+  try { writeSnapshot("startup"); } catch {}
+  setInterval(() => {
+    const s = state.settings || {};
+    if (!s.autoBackup || !dirty) return;
+    const last = state.meta && state.meta.lastBackupAt ? Date.parse(state.meta.lastBackupAt) : 0;
+    if ((Date.now() - last) / 60000 >= (s.backupIntervalMin || 10)) { try { writeSnapshot("auto"); } catch {} }
+  }, 60000);
   if (process.env.NO_OPEN !== "1") {                       // auto-open the browser on the shop device
     const url = "http://localhost:" + PORT;
     try {
@@ -417,3 +530,4 @@ server.listen(PORT, "0.0.0.0", () => {
     } catch {}
   }
 });
+["SIGINT", "SIGTERM"].forEach((sig) => process.on(sig, () => { try { writeSnapshot("shutdown"); } catch {} process.exit(0); }));

@@ -105,7 +105,7 @@ const PATHS={ coffee:"M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-
   clock:"M12 22a10 10 0 100-20 10 10 0 000 20zM12 6v6l4 2", send:"M22 2 11 13M22 2l-7 20-4-9-9-4z",
   card:"M2 7h20v10H2zM2 11h20", cash:"M2 6h20v12H2zM12 15a3 3 0 100-6 3 3 0 000 6z",
   note:"M11 4H4v16h16v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z", lock:"M5 11h14v10H5zM8 11V7a4 4 0 018 0v4",
-  logout:"M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9", eye:"M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7zM12 15a3 3 0 100-6 3 3 0 000 6z" };
+  logout:"M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9", eye:"M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7zM12 15a3 3 0 100-6 3 3 0 000 6z", save:"M12 3v12M8 11l4 4 4-4M4 21h16" };
 function Ico({n,size=18,color="currentColor"}){return(<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={PATHS[n]}/></svg>);}
 
 let WAITER=null;
@@ -531,6 +531,22 @@ function PayModal({name,order,mob,onAdd,onCancel}){
   </div></Overlay>);
 }
 
+/* ---------- restore-from-backup picker ---------- */
+function RestoreModal({backups,onClose,onPick}){
+  const fmtSize=(n)=>n>1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";
+  return(<Overlay center onBackdrop={onClose}><div style={{background:C.panel,borderRadius:16,padding:18,width:"100%",maxWidth:560,border:`1px solid ${C.line}`,maxHeight:"88vh",overflowY:"auto"}}>
+    <div className="flex ac jb" style={{marginBottom:6}}><span style={{fontWeight:800,fontSize:16}}>Restore from backup</span><button className="btn" onClick={onClose} style={{...ICON,cursor:"pointer"}}><Ico n="x" size={18} color={C.mute}/></button></div>
+    <div style={{fontSize:11.5,color:C.subtle,marginBottom:12}}>Pick a snapshot to load. This replaces the current data on this computer with the chosen one. <b>folder</b> = your cloud/off-machine folder, <b>local</b> = this computer.</div>
+    {backups.length===0?<Empty>No backups found yet. Set a backup folder and press “Back up now”.</Empty>:(<div style={{display:"grid",gap:6}}>
+      {backups.map((b,i)=>(<button key={i} className="btn" onClick={()=>onPick(b)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",background:C.panel2,border:`1px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.text,cursor:"pointer"}}>
+        <span style={{fontSize:9,fontWeight:800,textTransform:"uppercase",color:b.source==="folder"?C.blue:C.mute,border:`1px solid ${b.source==="folder"?C.blue:C.line}`,borderRadius:5,padding:"1px 6px"}}>{b.source}</span>
+        <span style={{flex:1,minWidth:0,fontFamily:MONO,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.name}</span>
+        <span style={{fontSize:11.5,color:C.mute,fontFamily:MONO}}>{new Date(b.at).toLocaleString()}</span>
+        <span style={{fontSize:10.5,color:C.subtle,fontFamily:MONO,width:56,textAlign:"right"}}>{fmtSize(b.size)}</span></button>))}
+    </div>)}
+  </div></Overlay>);
+}
+
 /* ---------- print preview (no printer needed) ---------- */
 function PreviewModal({data,onClose}){
   const tickets=[...(data.prep||[]),...(data.receipt?[{...data.receipt,isReceipt:true}]:[])];
@@ -663,7 +679,7 @@ function Setup({state,mob}){
   const [pN,setPN]=useState(""),[pP,setPP]=useState(""),[pC,setPC]=useState("Coffee"),[pPr,setPPr]=useState((printers.find((p)=>!p.food&&p.id!==receiptPrinterId)||printers[0]||{}).id||"");
   const [fN,setFN]=useState("");const [tN,setTN]=useState(""),[tSe,setTSe]=useState("4"),[tF,setTF]=useState(floors[0]&&floors[0].id);
   const [wN,setWN]=useState(""),[wPin,setWPin]=useState(""),[wRole,setWRole]=useState("waiter");
-  const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);const [pVat,setPVat]=useState("13");const [pUnit,setPUnit]=useState("each");const [mq,setMq]=useState("");const [mexp,setMexp]=useState({});
+  const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);const [pVat,setPVat]=useState("13");const [pUnit,setPUnit]=useState("each");const [mq,setMq]=useState("");const [mexp,setMexp]=useState({});const [rst,setRst]=useState(null);
   return(<div style={{display:"grid",gap:20,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
     <div>
       <Title>Menu ({menu.length})</Title>
@@ -749,7 +765,27 @@ function Setup({state,mob}){
       </div>
     </div>
     <div style={{gridColumn:mob?"auto":"1 / -1"}}>
-      <Title>Shop details & business day</Title>
+      <Title>Backup &amp; restore</Title>
+      <div style={CARD}>
+        {(()=>{const m=state.meta||{};const s=state.settings||{};const okc=m.lastBackupAt?(m.lastBackupOk?C.green:C.red):C.mute;return(<React.Fragment>
+          <div className="flex ac jb wrap" style={{gap:10,marginBottom:10}}>
+            <div><div style={{fontSize:10.5,color:C.mute,textTransform:"uppercase",letterSpacing:.5}}>Last backup</div><div className="flex ac" style={{gap:7,marginTop:2}}><span style={{width:9,height:9,borderRadius:9,background:okc}}/><span style={{fontSize:13.5,fontWeight:700}}>{m.lastBackupAt?new Date(m.lastBackupAt).toLocaleString():"never yet"}</span></div>{m.lastBackupAt&&!m.lastBackupOk&&<div style={{fontSize:11,color:C.red,marginTop:2}}>{m.lastBackupMsg||"backup had a problem"}</div>}</div>
+            <div className="flex" style={{gap:8}}><button className="btn" onClick={()=>act("backupNow",{})} style={{...SMALL,display:"flex",alignItems:"center",gap:7,background:C.amber,color:C.ink,border:"none",fontWeight:800,cursor:"pointer"}}><Ico n="save" size={15}/> Back up now</button><button className="btn" onClick={async()=>{const r=await act("listBackups",{});setRst(r.backups||[]);}} style={{...SMALL,display:"flex",alignItems:"center",gap:7,background:C.panel3,color:C.text,cursor:"pointer"}}><Ico n="undo" size={15}/> Restore…</button></div>
+          </div>
+          <div className="flex ac wrap" style={{gap:8,marginBottom:12}}>
+            <a className="btn" href="/api/export" style={{...SMALL,display:"flex",alignItems:"center",gap:7,background:C.panel3,color:C.text,textDecoration:"none",cursor:"pointer"}}><Ico n="save" size={15}/> Export data file</a>
+            <label className="btn" style={{...SMALL,display:"flex",alignItems:"center",gap:7,background:C.panel3,color:C.text,cursor:"pointer"}}><Ico n="undo" size={15}/> Import data file…
+              <input type="file" accept="application/json,.json" style={{display:"none"}} onChange={(e)=>{const f=e.target.files&&e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=async()=>{try{const data=JSON.parse(rd.result);if(confirm("Import this file? It replaces ALL current data on this computer."))(async()=>{const r=await act("importData",{data});if(r&&!r.ok)alert("Import failed: "+(r.error||"unknown"));})();}catch{alert("That doesn't look like a valid Kafeneío data file.");}};rd.readAsText(f);e.target.value="";}}/></label>
+          </div>
+          <SettingRow label="Automatic backups while running" field="autoBackup" on={s.autoBackup} act2="setBackup"/>
+          <div className="flex ac jb" style={{padding:"11px 0",borderBottom:`1px solid ${C.line}`}}><span style={{fontSize:13.5}}>Backup every (minutes)</span><input type="number" min="1" defaultValue={s.backupIntervalMin||10} onBlur={(e)=>act("setBackup",{backupIntervalMin:Math.max(1,parseInt(e.target.value)||10)})} style={{...INP,width:70,textAlign:"center"}}/></div>
+          <div style={{padding:"11px 0 4px"}}><label style={{...LBL,display:"block",marginBottom:4}}>Cloud / off-machine backup folder</label>
+            <input defaultValue={s.backupDir||""} onBlur={(e)=>act("setBackup",{backupDir:e.target.value.trim()})} placeholder="e.g. C:\\Users\\you\\Dropbox\\KafeneioBackup" style={{...INP,width:"100%",fontFamily:MONO,fontSize:12}}/>
+            <div style={{color:C.subtle,fontSize:11.5,marginTop:6}}>Data lives in a local <b>SQLite database</b> (crash-safe, works fully offline). Point the folder above at <b>Dropbox / Google&nbsp;Drive / OneDrive</b> (or USB / network) for an off-machine copy that uploads when online. <b>Export</b> saves everything to one file you can keep anywhere; <b>Import</b> loads it back on any machine to return exactly to that point. If this computer dies: install the app on a new one, then either set the same cloud folder and <b>Restore…</b>, or <b>Import</b> your exported file.</div>
+          </div>
+        </React.Fragment>);})()}
+      </div>
+      {rst!==null&&<RestoreModal backups={rst} onClose={()=>setRst(null)} onPick={async(b)=>{if(confirm("Restore this backup? It replaces the current data on this computer.")){const r=await act("restoreBackup",{dir:b.dir,name:b.name});setRst(null);if(r&&!r.ok)alert("Restore failed: "+(r.error||"unknown"));}}}/>}
       <div style={{...CARD,display:"grid",gap:10,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
         <ShopField label="Business name" field="name" val={state.shop.name}/>
         <ShopField label="Address" field="address" val={state.shop.address}/>
@@ -773,7 +809,7 @@ const P=({children})=><p style={{color:C.mute,fontSize:12.5,margin:"6px 0 16px",
 const Empty=({children})=><div style={{background:C.panel,border:`1px dashed ${C.line}`,borderRadius:12,padding:30,textAlign:"center",color:C.subtle,fontSize:13}}>{children}</div>;
 function Dot({pid}){return<span title={pName(pid)} style={{width:8,height:8,borderRadius:8,background:pColor(pid),flexShrink:0,display:"inline-block"}}/>;}
 function ShopField({label,field,val}){return(<div><label style={{...LBL,display:"block",marginBottom:2}}>{label}</label><input defaultValue={val||""} onBlur={(e)=>act("setShop",{[field]:e.target.value})} style={{...INP,width:"100%"}}/></div>);}
-function SettingRow({label,field,on}){return(<button className="btn" onClick={()=>act("setSetting",{[field]:!on})} style={{display:"flex",alignItems:"center",gap:12,width:"100%",background:"transparent",border:"none",padding:"11px 0",cursor:"pointer",borderBottom:`1px solid ${C.line}`,color:C.text,textAlign:"left"}}><span style={{flex:1,fontSize:13.5}}>{label}</span><span style={{width:44,height:24,borderRadius:24,background:on?C.green:C.line,position:"relative",flexShrink:0,transition:"background .12s"}}><span style={{position:"absolute",top:2,left:on?22:2,width:20,height:20,borderRadius:20,background:"#fff",transition:"left .12s"}}/></span></button>);}
+function SettingRow({label,field,on,act2}){return(<button className="btn" onClick={()=>act(act2||"setSetting",{[field]:!on})} style={{display:"flex",alignItems:"center",gap:12,width:"100%",background:"transparent",border:"none",padding:"11px 0",cursor:"pointer",borderBottom:`1px solid ${C.line}`,color:C.text,textAlign:"left"}}><span style={{flex:1,fontSize:13.5}}>{label}</span><span style={{width:44,height:24,borderRadius:24,background:on?C.green:C.line,position:"relative",flexShrink:0,transition:"background .12s"}}><span style={{position:"absolute",top:2,left:on?22:2,width:20,height:20,borderRadius:20,background:"#fff",transition:"left .12s"}}/></span></button>);}
 const ICON={width:36,height:36,borderRadius:9,border:"none",background:C.panel2,display:"grid",placeItems:"center",color:C.text};
 const QTY={width:30,height:30,borderRadius:7,border:`1px solid ${C.line}`,background:C.panel2,display:"grid",placeItems:"center",color:C.text,flexShrink:0};
 const BIG={display:"flex",alignItems:"center",justifyContent:"center",gap:8,borderRadius:10,padding:"12px 14px",fontSize:13.5,fontFamily:SANS};
