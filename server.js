@@ -108,6 +108,7 @@ function migrate() {
     if (p.food === undefined) p.food = /kitchen/i.test(p.name);
     if (p.port === undefined) p.port = 9100;
     if (p.width === undefined) p.width = "80";
+    if (p.priced === undefined) p.priced = false;
   });
   // tables need a size
   state.tables.forEach((t) => { if (!t.size) t.size = "m"; if (!t.shape) t.shape = "square"; });
@@ -152,7 +153,7 @@ const CP = { init: [ESC, 0x40], boldOn: [ESC, 0x45, 1], boldOff: [ESC, 0x45, 0],
 const L = (s = "") => Buffer.from(s + "\n", "latin1");
 const B = (a) => Buffer.from(a);
 const cols = (l, r, w = 42) => L(String(l) + " ".repeat(Math.max(1, w - String(l).length - String(r).length)) + String(r));
-function buildTicket({ title, table, servedBy, items, total, payments, priced, width, shop }) {
+function buildTicket({ title, table, servedBy, items, total, payments, priced, width, shop, notLegal }) {
   const W = width === "58" ? 32 : 48;
   const col = (l, r) => L(String(l) + " ".repeat(Math.max(1, W - String(l).length - String(r).length)) + String(r));
   const p = [B(CP.init), B(CP.center), B(CP.big), B(CP.boldOn), L(priced && shop && shop.name ? shop.name : title), B(CP.normal), B(CP.boldOff)];
@@ -175,8 +176,35 @@ function buildTicket({ title, table, servedBy, items, total, payments, priced, w
     p.push(L("-".repeat(W)), B(CP.big), B(CP.boldOn), col("TOTAL", "EUR " + total.toFixed(2)), B(CP.normal), B(CP.boldOff));
     for (const pay of payments || []) p.push(L(`  ${pay.method === "card" ? "Card/POS" : "Cash"}: EUR ${pay.amount.toFixed(2)}`));
   }
+  if (notLegal) p.push(B(CP.center), B(CP.boldOn), L("* ORDER SLIP - NOT A LEGAL RECEIPT *"), B(CP.boldOff), B(CP.left));
   p.push(B(CP.feed(1)), B(CP.center), L("* * *"), B(CP.left), B(CP.feed(3)), B(CP.cut));
   return Buffer.concat(p);
+}
+function ticketText({ title, table, servedBy, items, total, payments, priced, width, shop, notLegal }) {
+  const W = width === "58" ? 32 : 48;
+  const line = "-".repeat(W);
+  const col = (l, r) => { l = String(l); r = String(r); return l + " ".repeat(Math.max(1, W - l.length - r.length)) + r; };
+  const out = [priced && shop && shop.name ? shop.name : title];
+  if (priced && shop) {
+    if (shop.address) out.push(shop.address);
+    const l2 = [shop.vat && ("AFM " + shop.vat), shop.taxOffice && ("DOY " + shop.taxOffice)].filter(Boolean).join("  ");
+    if (l2) out.push(l2);
+    if (shop.phone) out.push("Tel " + shop.phone);
+  }
+  if (table) out.push("Table " + table);
+  if (servedBy) out.push("Served by " + servedBy);
+  out.push(new Date().toLocaleString(), line);
+  for (const it of items) {
+    out.push(priced ? col(`${it.qty} x ${it.name}`, "EUR " + (it.qty * it.price).toFixed(2)) : `${it.qty} x ${it.name}`);
+    if (it.opts && it.opts.length) out.push("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / "));
+    if (it.note) out.push("   >> " + it.note);
+  }
+  if (priced && typeof total === "number") {
+    out.push(line, col("TOTAL", "EUR " + total.toFixed(2)));
+    for (const pay of payments || []) out.push("  " + (pay.method === "card" ? "Card/POS" : "Cash") + ": EUR " + pay.amount.toFixed(2));
+  }
+  if (notLegal) out.push("* ORDER SLIP - NOT A LEGAL RECEIPT *");
+  return out.join("\n");
 }
 function sendToPrinter(ip, port, buffer) {
   return new Promise((resolve, reject) => {
@@ -189,7 +217,9 @@ function sendToPrinter(ip, port, buffer) {
   });
 }
 async function printPrep(printer, tableName, waiterId, items) {
-  const buf = buildTicket({ title: printer.name.toUpperCase(), table: tableName, servedBy: waiterName(waiterId), items, priced: false, width: printer.width });
+  const priced = !!printer.priced;
+  const total = priced ? round2(items.reduce((s, x) => s + x.price * x.qty, 0)) : undefined;
+  const buf = buildTicket({ title: printer.name.toUpperCase(), table: tableName, servedBy: waiterName(waiterId), items, priced, total, width: printer.width, notLegal: priced });
   if (!printer.ip) return { name: printer.name, ok: false, reason: "no-ip" };
   try { await sendToPrinter(printer.ip, printer.port, buf); return { name: printer.name, ok: true }; }
   catch { return { name: printer.name, ok: false, reason: "offline" }; }
@@ -286,6 +316,23 @@ async function handleAction(type, payload = {}, waiterId) {
     case "setReceiptPrinter": state.receiptPrinterId = p.id; break;
     case "setShop": state.shop = { ...state.shop, ...p }; break;
     case "setSetting": state.settings = { ...state.settings, ...p }; break;
+    case "preview": {
+      const o = state.open[p.tableId]; const t = state.tables.find((x) => x.id === p.tableId);
+      const items = o ? o.items : [];
+      const unsent = items.filter((x) => !x.sent); const base = unsent.length ? unsent : items;
+      const prepBase = base.filter((x) => x.printerId && x.printerId !== state.receiptPrinterId);
+      const prep = [];
+      for (const pr of state.printers) {
+        if (pr.id === state.receiptPrinterId) continue;
+        const its = prepBase.filter((x) => printerReceives(pr, x));
+        if (!its.length) continue;
+        const total = pr.priced ? round2(its.reduce((s, x) => s + x.price * x.qty, 0)) : undefined;
+        prep.push({ name: pr.name, width: pr.width || "80", text: ticketText({ title: pr.name.toUpperCase(), table: t?.name, servedBy: waiterName(waiterId), items: its, priced: !!pr.priced, total, width: pr.width, notLegal: !!pr.priced }) });
+      }
+      const rp = printerById(state.receiptPrinterId);
+      const receipt = { name: rp ? rp.name : "Receipt", width: (rp && rp.width) || "80", text: ticketText({ title: "RECEIPT", table: t?.name, servedBy: waiterName(o ? (o.openedBy || waiterId) : waiterId), items, total: round2(items.reduce((s, x) => s + x.price * x.qty, 0)), payments: o ? o.payments : [], priced: true, width: rp && rp.width, shop: state.shop }) };
+      return { ok: true, preview: { prep, receipt } };
+    }
     case "addWaiter": state.waiters.push({ id: uid(), name: p.name, color: p.color || "#E8A23D", role: ["admin", "manager", "waiter", "kitchen"].includes(p.role) ? p.role : "waiter", pin: p.pin || "" }); break;
     case "updateWaiter": { const w = state.waiters.find((x) => x.id === p.id); if (w) Object.assign(w, p.patch || {}); break; }
     case "deleteWaiter": state.waiters = state.waiters.filter((w) => w.id !== p.id); break;

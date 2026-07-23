@@ -92,7 +92,7 @@ const PATHS={ coffee:"M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-
   clock:"M12 22a10 10 0 100-20 10 10 0 000 20zM12 6v6l4 2", send:"M22 2 11 13M22 2l-7 20-4-9-9-4z",
   card:"M2 7h20v10H2zM2 11h20", cash:"M2 6h20v12H2zM12 15a3 3 0 100-6 3 3 0 000 6z",
   note:"M11 4H4v16h16v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z", lock:"M5 11h14v10H5zM8 11V7a4 4 0 018 0v4",
-  logout:"M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" };
+  logout:"M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9", eye:"M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7zM12 15a3 3 0 100-6 3 3 0 000 6z" };
 function Ico({n,size=18,color="currentColor"}){return(<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={PATHS[n]}/></svg>);}
 
 let WAITER=null;
@@ -105,6 +105,7 @@ function App(){
   const [view,setView]=useState("floor");const [now,setNow]=useState(Date.now());
   const [floorId,setFloorId]=useState(null);const [arrange,setArrange]=useState(false);
   const [activeId,setActiveId]=useState(null);const [payId,setPayId]=useState(null);const [receipt,setReceipt]=useState(null);
+  const [preview,setPreview]=useState(null);
   const [toast,setToast]=useState(null);
   const mob=useIsMobile();
   useEffect(()=>{WAITER=waiter;},[waiter]);
@@ -162,7 +163,9 @@ function App(){
         onAdd={(m,opts)=>act("addItem",{tableId:active.id,item:{id:m.id,name:m.name,price:m.price,printerId:m.printerId,vat:m.vat,opts:opts||null}})}
         onQty={(i,d)=>act("changeQty",{tableId:active.id,index:i,delta:d})} onRemove={(i)=>act("removeItem",{tableId:active.id,index:i})}
         onNote={(i,note)=>act("setNote",{tableId:active.id,index:i,note})} onClose={()=>setActiveId(null)}
-        onPlace={()=>onPlace(active)} onBill={()=>onBill(active)} onPay={()=>setPayId(active.id)}/>}
+        onPlace={()=>onPlace(active)} onBill={()=>onBill(active)} onPay={()=>setPayId(active.id)}
+        onPreview={async()=>{const r=await act("preview",{tableId:active.id});if(r&&r.preview)setPreview({table:active.name,...r.preview});}}/>}
+      {preview&&<PreviewModal data={preview} onClose={()=>setPreview(null)}/>}
       {payTable&&payOrder&&<PayModal name={payTable.name} order={payOrder} mob={mob} onAdd={doPay} onCancel={()=>setPayId(null)}/>}
       {receipt&&<Receipt data={receipt} onClose={()=>setReceipt(null)}/>}
       {toast&&<div className="toast" style={{position:"fixed",left:"50%",transform:"translateX(-50%)",bottom:20,zIndex:40,background:C.panel3,border:`1px solid ${toast.c}`,color:C.text,borderRadius:12,padding:"12px 18px",fontSize:13.5,fontWeight:600,maxWidth:"90%",textAlign:"center",boxShadow:"0 8px 24px rgba(0,0,0,.4)"}}>{toast.t}</div>}
@@ -315,7 +318,7 @@ function Prep({printer,receiptId,open,tables,floors,now}){
 }
 
 /* ---------- order screen (mobile-correct) ---------- */
-function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onClose,onPlace,onBill,onPay}){
+function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onClose,onPlace,onBill,onPay,onPreview}){
   const [cat,setCat]=useState("All");const [noteIdx,setNoteIdx]=useState(-1);const [noteVal,setNoteVal]=useState("");const [pane,setPane]=useState("menu");
   const cats=useMemo(()=>["All",...Array.from(new Set(menu.map((m)=>m.cat)))],[menu]);
   const shown=cat==="All"?menu:menu.filter((m)=>m.cat===cat);
@@ -352,6 +355,7 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onC
     <div className="flex ac" style={{gap:12,padding:14,borderBottom:`1px solid ${C.line}`,background:C.panel}}>
       <button className="btn" onClick={onClose} style={{...ICON,cursor:"pointer"}}><Ico n="back" size={20}/></button>
       <div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:18}}>{table.name}</div><div className="flex ac" style={{gap:6,fontSize:11.5,color:C.mute}}>{table.seats} seats{order&&order.openedBy&&<React.Fragment>· <span style={{width:8,height:8,borderRadius:8,background:wColor(order.openedBy),display:"inline-block"}}/>{wLabel(order.openedBy)}</React.Fragment>}</div></div>
+      <button className="btn" onClick={onPreview} disabled={!items.length} title="Preview what will print" style={{...ICON,cursor:"pointer",opacity:items.length?1:.4}}><Ico n="eye" size={18} color={C.mute}/></button>
       <div style={{textAlign:"right"}}><div style={{fontFamily:MONO,fontSize:24,fontWeight:700,color:C.amber}}>{euro(total)}</div>{paid>0&&<div style={{fontSize:11,color:C.green,fontFamily:MONO}}>{euro(paid)} paid · {euro(total-paid)} left</div>}</div>
     </div>
     {mob&&<div className="flex" style={{padding:"8px 12px 0",gap:8}}>
@@ -464,6 +468,20 @@ function PayModal({name,order,mob,onAdd,onCancel}){
         <button className="btn" onClick={payItems} style={{...BIG,width:"100%",justifyContent:"space-between",background:C.green,border:"none",color:C.ink,fontWeight:800,fontSize:15,cursor:"pointer"}}><span>{anySel?"Pay selected":"Pay all"}</span><span style={{fontFamily:MONO}}>{euro(anySel?selAmount:remaining)}</span></button>:
         <button className="btn" onClick={payAmount} style={{...BIG,width:"100%",justifyContent:"space-between",background:C.green,border:"none",color:C.ink,fontWeight:800,fontSize:15,cursor:"pointer"}}><span>{parseFloat(amount)>=remaining?"Pay & close":"Take part payment"}</span><span style={{fontFamily:MONO}}>{euro(parseFloat(amount)||0)}</span></button>}
     </div>
+  </div></Overlay>);
+}
+
+/* ---------- print preview (no printer needed) ---------- */
+function PreviewModal({data,onClose}){
+  const tickets=[...(data.prep||[]),...(data.receipt?[{...data.receipt,isReceipt:true}]:[])];
+  const Paper=({t})=>(<div style={{background:C.paper,color:"#241D14",borderRadius:8,padding:"14px 12px",boxShadow:`0 2px 0 ${C.paperLine}`,width:t.width==="58"?260:340,maxWidth:"100%"}}>
+    <div style={{fontSize:10.5,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:"#8A6A3A",marginBottom:6}}>{t.isReceipt?"Receipt printer":"→ "+t.name}{t.width?` · ${t.width}mm`:""}</div>
+    <pre style={{margin:0,fontFamily:MONO,fontSize:t.width==="58"?10.5:11.5,lineHeight:1.45,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{t.text}</pre>
+  </div>);
+  return(<Overlay center onBackdrop={onClose}><div style={{background:C.panel,borderRadius:16,padding:18,width:"100%",maxWidth:760,border:`1px solid ${C.line}`,maxHeight:"92vh",overflowY:"auto"}}>
+    <div className="flex ac jb" style={{marginBottom:6}}><span style={{fontWeight:800,fontSize:16}}>Print preview · {data.table}</span><button className="btn" onClick={onClose} style={{...ICON,cursor:"pointer"}}><Ico n="x" size={18} color={C.mute}/></button></div>
+    <div style={{fontSize:11.5,color:C.subtle,marginBottom:14}}>Exactly what each printer would print. The kitchen/bar/order slips fire on <b>Send order</b>; the receipt fires on <b>Bill</b> or when the table is paid.</div>
+    {tickets.length===0?<Empty>Nothing to print yet — add some items.</Empty>:(<div className="flex wrap" style={{gap:14,alignItems:"flex-start"}}>{tickets.map((t,i)=><Paper key={i} t={t}/>)}</div>)}
   </div></Overlay>);
 }
 
@@ -623,14 +641,15 @@ function Setup({state,mob}){
           <input value={p.ip} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{ip:e.target.value}})} placeholder="IP address" style={{...INP,flex:1,minWidth:100,padding:"6px 8px"}}/>
           <input value={p.port||9100} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{port:parseInt(e.target.value)||9100}})} title="port" style={{...INP,width:58,padding:"6px 8px"}}/>
           <select value={p.width||"80"} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{width:e.target.value}})} title="paper width" style={{...INP,width:74,padding:"5px 6px",fontSize:11.5}}><option value="80">80mm</option><option value="58">58mm</option></select>
-          {receiptPrinterId!==p.id&&<select value={p.mode||(p.all?"all":"own")} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{mode:e.target.value}})} title="what this screen/printer shows" style={{...INP,padding:"5px 6px",fontSize:11.5,width:128}}><option value="own">Own items</option><option value="rest">All except food</option><option value="all">Everything</option></select>}
+          {receiptPrinterId!==p.id&&<select value={p.mode||(p.all?"all":"own")} onChange={(e)=>act("updatePrinter",{id:p.id,patch:{mode:e.target.value}})} title="what this screen/printer shows" style={{...INP,padding:"5px 6px",fontSize:11.5,width:150}}><option value="own">Only its own items</option><option value="rest">All except food (Bar)</option><option value="all">Whole order slip (all)</option></select>}
           {receiptPrinterId!==p.id&&<button className="btn" onClick={()=>act("updatePrinter",{id:p.id,patch:{food:!p.food}})} title="mark as a food / kitchen station" style={{...CHIP,padding:"5px 8px",background:p.food?C.red:C.panel3,color:p.food?C.ink:C.mute}}>Food</button>}
+          {receiptPrinterId!==p.id&&<button className="btn" onClick={()=>act("updatePrinter",{id:p.id,patch:{priced:!p.priced}})} title="print prices + total on this ticket (an order slip, not a legal receipt)" style={{...CHIP,padding:"5px 8px",background:p.priced?C.amber:C.panel3,color:p.priced?C.ink:C.mute}}>€ Prices</button>}
           <button className="btn" onClick={()=>act("setReceiptPrinter",{id:p.id})} title="prints the customer bill" style={{...CHIP,padding:"5px 8px",background:receiptPrinterId===p.id?C.green:C.panel3,color:receiptPrinterId===p.id?C.ink:C.mute}}>Bill</button>
           <button className="btn" onClick={()=>act("deletePrinter",{id:p.id})} style={{...ICON,width:26,height:26,cursor:"pointer"}}><Ico n="trash" size={12} color={C.red}/></button>
         </div>))}
         <div className="flex wrap" style={{gap:8,marginTop:10}}><input placeholder="Name (e.g. Grill / Pass)" value={prN} onChange={(e)=>setPrN(e.target.value)} style={{...INP,flex:1,minWidth:120}}/><input placeholder="IP" value={prIp} onChange={(e)=>setPrIp(e.target.value)} style={{...INP,width:110}}/>
           <button className="btn" onClick={()=>{if(prN){act("addPrinter",{name:prN,ip:prIp,color:PAL[printers.length%PAL.length]});setPrN("");setPrIp("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add printer</button></div>
-        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}><b>Shows</b>: <i>Own items</i> = only what you route to it · <i>All except food</i> = every drink/other item, skipping food stations (this is your Bar) · <i>Everything</i> = one copy of the whole order (expo). <b>Food</b> marks a kitchen station so “All except food” knows to skip it. <b>Bill</b> = the customer receipt. Each non-Bill printer gets its own tab.</div>
+        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}><b>Shows</b>: <i>Only its own items</i> = just what you route to it · <i>All except food</i> = every drink/other item, skipping food stations (this is your Bar) · <i>Whole order slip</i> = one combined ticket with everything ordered while items still go to their stations too. <b>Food</b> marks a kitchen station. <b>€ Prices</b> = print prices + total on this ticket (a priced order slip — clearly marked <i>not a legal receipt</i>). <b>Bill</b> = the customer receipt. Each non-Bill printer gets its own tab.</div>
       </div>
       <div style={{marginTop:8,borderTop:`1px solid ${C.line}`,paddingTop:16}}><button className="btn" onClick={()=>{if(confirm("Reset everything to demo defaults?"))act("reset",{});}} style={{...BIG,background:"transparent",border:`1px solid ${C.red}`,color:C.red,cursor:"pointer"}}>Reset all data to demo defaults</button></div>
     </div>
