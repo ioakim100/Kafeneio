@@ -71,7 +71,7 @@ const SEED = {
     { id: "w1", name: "Maria", color: "#E8A23D", role: "waiter", pin: "1111" },
     { id: "w2", name: "Nikos", color: "#7BC49A", role: "waiter", pin: "2222" },
   ],
-  shop: { name: "Kafeneío", vat: "", taxOffice: "", address: "", phone: "" },
+  shop: { name: "Kafeneío", vat: "", taxOffice: "", address: "", phone: "", dayStart: 5 },
   open: {},
   sales: [],
 };
@@ -101,6 +101,7 @@ function migrate() {
     if (!r) { r = { id: "pr", name: "Receipt", ip: "", color: "#7BC49A" }; state.printers.push(r); }
     state.receiptPrinterId = r.id;
   }
+  if (state.shop && state.shop.dayStart === undefined) state.shop.dayStart = 5;
   state.printers.forEach((p) => {
     if (p.mode === undefined) p.mode = p.all ? "all" : (/bar/i.test(p.name) ? "rest" : "own");
     if (p.food === undefined) p.food = /kitchen/i.test(p.name);
@@ -111,7 +112,7 @@ function migrate() {
   state.tables.forEach((t) => { if (!t.size) t.size = "m"; if (!t.shape) t.shape = "square"; });
   // menu: station -> printerId
   const map = { kitchen: "pk", bar: "pb", none: "" };
-  state.menu.forEach((m) => { if (m.printerId === undefined) m.printerId = map[m.station] ?? "pb"; delete m.station; });
+  state.menu.forEach((m) => { if (m.printerId === undefined) m.printerId = map[m.station] ?? "pb"; delete m.station; if (m.vat === undefined) m.vat = m.cat === "Cold Drinks" ? 24 : 13; });
   // waiters: role + ensure an admin exists
   state.waiters.forEach((w) => { if (!w.role) w.role = "waiter"; });
   if (!state.waiters.some((w) => w.role === "admin"))
@@ -268,7 +269,7 @@ async function handleAction(type, payload = {}, waiterId) {
     case "deleteTable": state.tables = state.tables.filter((t) => t.id !== p.id); break;
     case "addFloor": state.floors.push({ id: uid(), name: p.name }); break;
     case "deleteFloor": if (state.floors.length > 1) { state.floors = state.floors.filter((f) => f.id !== p.id); state.tables = state.tables.filter((t) => t.floorId !== p.id); } break;
-    case "addProduct": state.menu.push({ id: uid(), name: p.name, price: p.price, cat: p.cat, printerId: p.printerId || "" }); break;
+    case "addProduct": state.menu.push({ id: uid(), name: p.name, price: p.price, cat: p.cat, printerId: p.printerId || "", vat: p.vat != null ? p.vat : 13 }); break;
     case "updateProduct": { const m = state.menu.find((x) => x.id === p.id); if (m) Object.assign(m, p.patch || {}); break; }
     case "deleteProduct": state.menu = state.menu.filter((m) => m.id !== p.id); break;
     case "addPrinter": state.printers.push({ id: uid(), name: p.name || "Printer", ip: p.ip || "", color: p.color || "#E8A23D" }); break;

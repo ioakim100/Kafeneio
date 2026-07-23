@@ -50,6 +50,8 @@ const paidQtyMap=(o)=>{const m={};(o?.payments||[]).forEach(p=>(p.lines||[]).for
 const uid=()=>Math.random().toString(36).slice(2,9);
 const optsText=(it)=>it&&it.opts&&it.opts.length?it.opts.map(o=>o.values.join(", ")).join(" · "):"";
 const dayKey=(d)=>{const x=new Date(d);return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`;};
+let DAY_START=5;
+const bizDay=(d)=>{const t=(typeof d==="number"?d:new Date(d).getTime())-DAY_START*3600000;return dayKey(new Date(t));};
 const relTime=(iso,now)=>{if(!iso)return"";const s=Math.max(0,Math.floor((now-new Date(iso).getTime())/1000));if(s<60)return"just now";const m=Math.floor(s/60);if(m<60)return m+" min";return Math.floor(m/60)+"h "+(m%60)+"m";};
 const tableStatus=(o)=>{if(!o||!o.items.length)return"free";if(o.items.some(x=>!x.sent))return"new";if(o.items.some(x=>x.sent&&!x.done))return"prep";return"served";};
 
@@ -105,7 +107,7 @@ function App(){
 
   if(!state) return <Center><div style={{color:C.mute}}>Connecting…</div></Center>;
   if(!waiter) return <Login waiters={state.waiters} shopName={(state.shop&&state.shop.name)||"Kafeneío POS"} onLogin={(w)=>{localStorage.setItem("waiter",JSON.stringify(w));setWaiter(w);}}/>;
-  PRINTERS=state.printers; WAITERS=state.waiters;
+  PRINTERS=state.printers; WAITERS=state.waiters; DAY_START=(state.shop&&state.shop.dayStart!=null)?state.shop.dayStart:5;
   const isAdmin=waiter.role==="admin";
   const open=state.open, tables=state.tables, floors=state.floors, waiters=state.waiters;
   const prepPrinters=state.printers.filter((p)=>p.id!==state.receiptPrinterId);
@@ -145,7 +147,7 @@ function App(){
         {view==="setup"&&isAdmin&&<Setup state={state} mob={mob}/>}
       </div>
       {active&&<OrderScreen table={active} order={activeOrder} menu={state.menu} wname={wname} mob={mob}
-        onAdd={(m,opts)=>act("addItem",{tableId:active.id,item:{id:m.id,name:m.name,price:m.price,printerId:m.printerId,opts:opts||null}})}
+        onAdd={(m,opts)=>act("addItem",{tableId:active.id,item:{id:m.id,name:m.name,price:m.price,printerId:m.printerId,vat:m.vat,opts:opts||null}})}
         onQty={(i,d)=>act("changeQty",{tableId:active.id,index:i,delta:d})} onRemove={(i)=>act("removeItem",{tableId:active.id,index:i})}
         onNote={(i,note)=>act("setNote",{tableId:active.id,index:i,note})} onClose={()=>setActiveId(null)}
         onPlace={()=>onPlace(active)} onBill={()=>onBill(active)} onPay={()=>setPayId(active.id)}/>}
@@ -183,7 +185,7 @@ function TopBar({tabs,view,setView,waiter,openCount,onLogout,shopName}){
   return(<div style={{position:"sticky",top:0,zIndex:5,background:`linear-gradient(${C.panel},#1a1613)`,borderBottom:`1px solid ${C.line}`}}>
     <div className="flex ac" style={{gap:10,padding:"12px 14px 6px"}}>
       <div style={{width:28,height:28,borderRadius:8,background:`linear-gradient(135deg,${C.amber},#C97B2A)`,display:"grid",placeItems:"center"}}><Ico n="coffee" size={16} color={C.ink}/></div>
-      <div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{shopName}</div><div style={{fontSize:10.5,color:C.mute,fontFamily:MONO,letterSpacing:1}}>{dayKey(new Date())}{openCount?` · ${openCount} open`:""}</div></div>
+      <div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{shopName}</div><div style={{fontSize:10.5,color:C.mute,fontFamily:MONO,letterSpacing:1}}>{bizDay(Date.now())}{openCount?` · ${openCount} open`:""}</div></div>
       <button className="btn" onClick={onLogout} style={{display:"flex",alignItems:"center",gap:7,background:C.panel2,border:`1px solid ${C.line}`,borderRadius:20,padding:"6px 12px",color:C.text,cursor:"pointer"}}>
         <span style={{width:9,height:9,borderRadius:9,background:waiter.color}}/><span style={{fontSize:12.5,fontWeight:700}}>{waiter.name}</span><Ico n="logout" size={13} color={C.mute}/></button>
     </div>
@@ -477,38 +479,50 @@ function Receipt({data,onClose}){
 
 /* ---------- reports ---------- */
 function Reports({sales,waiters}){
-  const [month,setMonth]=useState(()=>{const d=new Date();return{y:d.getFullYear(),m:d.getMonth()};});const [sel,setSel]=useState(()=>dayKey(new Date()));const [openIds,setOpenIds]=useState({});
-  const byDay=useMemo(()=>{const map={};sales.forEach((s)=>{const k=dayKey(s.closedAt);(map[k]=map[k]||[]).push(s);});return map;},[sales]);
-  const day=byDay[sel]||[];const dayTotal=day.reduce((s,x)=>s+x.total,0);
-  const pm=(m)=>day.flatMap((s)=>s.payments||[{amount:s.total,method:s.method}]).filter((p)=>p.method===m).reduce((s,p)=>s+p.amount,0);
-  const cash=round2(pm("cash")),card=round2(pm("card"));
-  const products=useMemo(()=>{const map={};day.forEach((s)=>s.items.forEach((it)=>{const e=map[it.name]||{name:it.name,qty:0,rev:0};e.qty+=it.qty;e.rev+=it.price*it.qty;map[it.name]=e;}));return Object.values(map).sort((a,b)=>b.rev-a.rev);},[day]);
-  const byWaiter=useMemo(()=>{const map={};day.forEach((s)=>{const w=(waiters.find((w)=>w.id===s.waiterId)||{}).name||"—";map[w]=(map[w]||0)+s.total;});return Object.entries(map).sort((a,b)=>b[1]-a[1]);},[day,waiters]);
-  const first=new Date(month.y,month.m,1);const startDow=(first.getDay()+6)%7;const days=new Date(month.y,month.m+1,0).getDate();
-  const cells=[];for(let i=0;i<startDow;i++)cells.push(null);for(let d=1;d<=days;d++)cells.push(d);
-  const shift=(dir)=>setMonth((p)=>{let m=p.m+dir,y=p.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}return{y,m};});
-  return(<div><Title>Daily takings</Title>
-    <div style={{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",alignItems:"start",marginTop:12}}>
-      <div style={{background:C.panel,borderRadius:14,border:`1px solid ${C.line}`,padding:14}}>
-        <div className="flex ac jb" style={{marginBottom:12}}><button className="btn" onClick={()=>shift(-1)} style={{...ICON,cursor:"pointer"}}><Ico n="left" size={18}/></button><span style={{fontWeight:700,fontSize:14}}>{first.toLocaleString("en-US",{month:"long",year:"numeric"})}</span><button className="btn" onClick={()=>shift(1)} style={{...ICON,cursor:"pointer"}}><Ico n="right" size={18}/></button></div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,fontSize:10.5,color:C.subtle,marginBottom:4,fontFamily:MONO}}>{["M","T","W","T","F","S","S"].map((d,i)=><div key={i} style={{textAlign:"center"}}>{d}</div>)}</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>{cells.map((d,i)=>{if(!d)return<div key={i}/>;const k=`${month.y}-${String(month.m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;const tot=(byDay[k]||[]).reduce((s,x)=>s+x.total,0);const on=sel===k;const today=k===dayKey(new Date());return(<button key={i} onClick={()=>setSel(k)} style={{aspectRatio:"1",borderRadius:8,position:"relative",cursor:"pointer",border:`1px solid ${on?C.amber:today?C.amberDim:"transparent"}`,background:on?C.amber:tot>0?C.panel2:"transparent",color:on?C.ink:C.text,display:"grid",placeItems:"center",padding:0}}><span style={{fontSize:12.5,fontFamily:MONO,fontWeight:on?800:500}}>{d}</span>{tot>0&&<span style={{position:"absolute",bottom:3,width:4,height:4,borderRadius:4,background:on?C.ink:C.green}}/>}</button>);})}</div>
-      </div>
-      <div style={{background:C.paper,borderRadius:14,padding:"20px 22px",color:"#2A231A",fontFamily:MONO,boxShadow:`0 3px 0 ${C.paperLine}`}}>
-        <div style={{textAlign:"center",borderBottom:`2px dashed ${C.paperLine}`,paddingBottom:12}}><div style={{fontFamily:SANS,fontWeight:800,fontSize:15,letterSpacing:1}}>DAY REPORT</div><div style={{fontSize:12,marginTop:3}}>{sel}</div></div>
-        <RRow l="Orders closed" v={String(day.length)}/><div style={{borderTop:`1px dashed ${C.paperLine}`,margin:"8px 0"}}/><RRow l="Cash" v={euro(cash)}/><RRow l="Card / POS" v={euro(card)}/><div style={{borderTop:`2px dashed ${C.paperLine}`,margin:"10px 0"}}/>
-        <div className="flex jb" style={{alignItems:"baseline"}}><span style={{fontFamily:SANS,fontWeight:800,fontSize:15}}>TOTAL</span><span style={{fontSize:26,fontWeight:800}}>{euro(dayTotal)}</span></div>
-        <Sub>BY WAITER</Sub>{byWaiter.length===0?<Muted>—</Muted>:byWaiter.map(([n,v])=>(<div key={n} className="flex jb" style={{fontSize:12.5,padding:"2px 0"}}><span>{n}</span><span>{euro(v)}</span></div>))}
-        <Sub>PRODUCTS SOLD</Sub>{products.length===0?<Muted>No sales recorded for this day.</Muted>:products.map((p)=>(<div key={p.name} className="flex jb" style={{fontSize:12.5,padding:"2px 0"}}><span>{p.qty}× {p.name}</span><span>{euro(p.rev)}</span></div>))}
-      </div>
+  const today=bizDay(Date.now());
+  const [from,setFrom]=useState(today);const [to,setTo]=useState(today);const [openIds,setOpenIds]=useState({});
+  const list=useMemo(()=>sales.filter((s)=>{const d=bizDay(s.closedAt);return d>=from&&d<=to;}),[sales,from,to]);
+  const gross=round2(list.reduce((s,x)=>s+x.total,0));
+  const agg=useMemo(()=>{let net=0,vat=0;const rate={},prod={},wmap={},pay={cash:0,card:0};
+    list.forEach((s)=>{
+      s.items.forEach((it)=>{const g=it.price*it.qty;const r=it.vat!=null?it.vat:0;const n=g/(1+r/100);net+=n;vat+=g-n;
+        const e=rate[r]||{rate:r,gross:0,net:0,vat:0};e.gross+=g;e.net+=n;e.vat+=g-n;rate[r]=e;
+        const pe=prod[it.name]||{name:it.name,qty:0,rev:0};pe.qty+=it.qty;pe.rev+=g;prod[it.name]=pe;});
+      const wn=(waiters.find((w)=>w.id===s.waiterId)||{}).name||"—";wmap[wn]=wmap[wn]||{name:wn,gross:0,tx:0};wmap[wn].gross+=s.total;wmap[wn].tx+=1;
+      const ps=s.payments&&s.payments.length?s.payments:[{amount:s.total,method:s.method}];ps.forEach((p)=>{pay[p.method==="card"?"card":"cash"]+=p.amount;});
+    });
+    return {net:round2(net),vat:round2(vat),rates:Object.values(rate).sort((a,b)=>a.rate-b.rate),products:Object.values(prod).sort((a,b)=>b.rev-a.rev),waiterRows:Object.values(wmap).sort((a,b)=>b.gross-a.gross),cash:round2(pay.cash),card:round2(pay.card)};
+  },[list,waiters]);
+  const setRange=(f,t)=>{setFrom(f);setTo(t);};
+  const yday=()=>bizDay(Date.now()-24*3600000);
+  const monthStart=()=>{const d=new Date();return dayKey(new Date(d.getFullYear(),d.getMonth(),1));};
+  return(<div>
+    <div className="flex ac jb wrap" style={{gap:10,marginBottom:8}}><Title>Sales report</Title>
+      <button className="btn" onClick={()=>window.print()} style={{display:"flex",alignItems:"center",gap:7,...SMALL,background:C.panel3,color:C.text,cursor:"pointer"}}><Ico n="printer" size={15}/> Print</button></div>
+    <div className="flex ac wrap" style={{gap:10,marginBottom:14}}>
+      <label style={{fontSize:12,color:C.mute}}>From <input type="date" value={from} max={to} onChange={(e)=>setFrom(e.target.value)} style={{...INP,padding:"7px 9px",colorScheme:"dark"}}/></label>
+      <label style={{fontSize:12,color:C.mute}}>To <input type="date" value={to} min={from} onChange={(e)=>setTo(e.target.value)} style={{...INP,padding:"7px 9px",colorScheme:"dark"}}/></label>
+      <div className="flex" style={{gap:6}}>{[["Today",()=>setRange(today,today)],["Yesterday",()=>setRange(yday(),yday())],["This month",()=>setRange(monthStart(),today)]].map(([l,fn])=>(<button key={l} className="btn" onClick={fn} style={{...CHIP,background:C.panel3,color:C.text}}>{l}</button>))}</div>
+    </div>
+    <div style={{display:"grid",gap:10,gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",marginBottom:14}}>
+      <Stat label="Transactions" val={String(list.length)}/>
+      <Stat label="Turnover (gross)" val={euro(gross)} accent/>
+      <Stat label="Net sales" val={euro(agg.net)}/>
+      <Stat label="VAT" val={euro(agg.vat)}/>
+    </div>
+    <div style={{display:"grid",gap:16,gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",alignItems:"start"}}>
+      <Panel title="By payment type"><KV k="Cash" v={euro(agg.cash)}/><KV k="Card / POS" v={euro(agg.card)}/></Panel>
+      <Panel title="VAT breakdown">{agg.rates.length===0?<Muted2>No sales.</Muted2>:agg.rates.map((r)=>(<div key={r.rate} style={{marginBottom:10}}><div style={{fontWeight:700,fontSize:13,marginBottom:2,color:C.amber}}>VAT {r.rate}%</div><KV k="Gross" v={euro(round2(r.gross))}/><KV k="Net" v={euro(round2(r.net))}/><KV k="VAT" v={euro(round2(r.vat))}/></div>))}</Panel>
+      <Panel title="By waiter">{agg.waiterRows.length===0?<Muted2>No sales.</Muted2>:agg.waiterRows.map((w)=>(<KV key={w.name} k={`${w.name} · ${w.tx} tx`} v={euro(round2(w.gross))}/>))}</Panel>
+      <Panel title="Products sold">{agg.products.length===0?<Muted2>No sales.</Muted2>:agg.products.map((p)=>(<KV key={p.name} k={`${p.qty}× ${p.name}`} v={euro(round2(p.rev))}/>))}</Panel>
     </div>
     <div style={{marginTop:18}}>
-      <div className="flex ac jb" style={{marginBottom:8}}><Title>Paid orders · {sel}</Title><span style={{fontSize:12,color:C.mute,fontFamily:MONO}}>{day.length} ticket{day.length===1?"":"s"}</span></div>
-      {day.length===0?<Empty>No paid orders on this day.</Empty>:(<div style={{display:"grid",gap:8}}>
-        {[...day].sort((a,b)=>new Date(b.closedAt)-new Date(a.closedAt)).map((s)=>{const opn=!!openIds[s.id];const mc=s.method==="cash"?C.green:s.method==="split"?C.violet:C.amber;return(
+      <div className="flex ac jb" style={{marginBottom:8}}><Title>Paid orders</Title><span style={{fontSize:12,color:C.mute,fontFamily:MONO}}>{list.length} ticket{list.length===1?"":"s"}</span></div>
+      {list.length===0?<Empty>No paid orders in this range.</Empty>:(<div style={{display:"grid",gap:8}}>
+        {[...list].sort((a,b)=>new Date(b.closedAt)-new Date(a.closedAt)).map((s)=>{const opn=!!openIds[s.id];const mc=s.method==="cash"?C.green:s.method==="split"?C.violet:C.amber;return(
           <div key={s.id} style={{background:C.panel,border:`1px solid ${C.line}`,borderRadius:12,overflow:"hidden"}}>
             <button className="btn" onClick={()=>setOpenIds((o)=>({...o,[s.id]:!o[s.id]}))} style={{width:"100%",textAlign:"left",background:"transparent",border:"none",color:C.text,cursor:"pointer",padding:"11px 13px",display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontFamily:MONO,fontSize:12,color:C.mute,width:42}}>{new Date(s.closedAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</span>
+              <span style={{fontFamily:MONO,fontSize:12,color:C.mute,width:88}}>{new Date(s.closedAt).toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit"})} {new Date(s.closedAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</span>
               <span style={{fontWeight:800,fontSize:14,minWidth:52}}>{s.tableName}</span>
               <span className="flex ac" style={{gap:5,flex:1,minWidth:0,fontSize:12,color:C.mute}}><span style={{width:8,height:8,borderRadius:8,background:wColor(s.waiterId)}}/>{wLabel(s.waiterId)||"—"}</span>
               <span style={{fontSize:10,fontWeight:800,color:mc,border:`1px solid ${mc}`,borderRadius:5,padding:"1px 6px",textTransform:"uppercase"}}>{s.method==="card"?"Card":s.method==="split"?"Split":"Cash"}</span>
@@ -516,7 +530,7 @@ function Reports({sales,waiters}){
               <span style={{color:C.subtle,transform:opn?"rotate(90deg)":"none",transition:"transform .12s",display:"flex"}}><Ico n="right" size={16}/></span>
             </button>
             {opn&&<div style={{padding:"0 13px 12px",borderTop:`1px solid ${C.line}`}}>
-              <div style={{padding:"8px 0"}}>{s.items.map((it,i)=>(<div key={i}><div className="flex ac" style={{gap:7,fontSize:12.5,padding:"2px 0"}}><Dot pid={it.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{it.qty}×</span><span style={{flex:1}}>{it.name}</span><span style={{fontFamily:MONO,color:C.mute}}>{euro(it.price*it.qty)}</span></div>{it.opts&&it.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(it)}</div>}{it.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {it.note}</div>}</div>))}</div>
+              <div style={{padding:"8px 0"}}>{s.items.map((it,i)=>(<div key={i}><div className="flex ac" style={{gap:7,fontSize:12.5,padding:"2px 0"}}><Dot pid={it.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{it.qty}×</span><span style={{flex:1}}>{it.name}</span>{it.vat!=null&&<span style={{fontSize:10,color:C.subtle,fontFamily:MONO}}>{it.vat}%</span>}<span style={{fontFamily:MONO,color:C.mute}}>{euro(it.price*it.qty)}</span></div>{it.opts&&it.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(it)}</div>}{it.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {it.note}</div>}</div>))}</div>
               {s.payments&&s.payments.length>0&&<div style={{borderTop:`1px dashed ${C.line}`,paddingTop:6}}>{s.payments.map((p,i)=>(<div key={i} className="flex ac jb" style={{fontSize:12,color:C.mute,padding:"1px 0"}}><span className="flex ac" style={{gap:5}}><Ico n={p.method==="card"?"card":"cash"} size={12} color={C.mute}/>{p.method==="card"?"Card/POS":"Cash"}{p.lines?" · items":""}</span><span style={{fontFamily:MONO}}>{euro(p.amount)}</span></div>))}</div>}
             </div>}
           </div>);})}
@@ -524,9 +538,10 @@ function Reports({sales,waiters}){
     </div>
   </div>);
 }
-const RRow=({l,v})=>(<div className="flex jb" style={{fontSize:13.5,padding:"3px 0"}}><span>{l}</span><span style={{fontWeight:700}}>{v}</span></div>);
-const Sub=({children})=>(<div style={{fontFamily:SANS,fontWeight:800,fontSize:12.5,letterSpacing:1,margin:"18px 0 6px",color:"#5A4B38"}}>{children}</div>);
-const Muted=({children})=>(<div style={{fontSize:12.5,color:"#7A6B55"}}>{children}</div>);
+const Stat=({label,val,accent})=>(<div style={{background:C.panel,border:`1px solid ${C.line}`,borderRadius:12,padding:"12px 14px"}}><div style={{fontSize:11,color:C.mute,marginBottom:4}}>{label}</div><div style={{fontFamily:MONO,fontSize:22,fontWeight:800,color:accent?C.amber:C.text}}>{val}</div></div>);
+const Panel=({title,children})=>(<div style={{background:C.panel,border:`1px solid ${C.line}`,borderRadius:14,padding:14}}><div style={{fontSize:12,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:C.mute,marginBottom:10}}>{title}</div>{children}</div>);
+const KV=({k,v})=>(<div className="flex ac jb" style={{fontSize:12.5,padding:"3px 0"}}><span style={{color:C.text,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginRight:8}}>{k}</span><span style={{fontFamily:MONO,fontWeight:700,color:C.text}}>{v}</span></div>);
+const Muted2=({children})=>(<div style={{fontSize:12.5,color:C.subtle}}>{children}</div>);
 
 /* ---------- setup (printers last) ---------- */
 function Setup({state,mob}){
@@ -534,29 +549,21 @@ function Setup({state,mob}){
   const [pN,setPN]=useState(""),[pP,setPP]=useState(""),[pC,setPC]=useState("Food"),[pPr,setPPr]=useState(printers[0]&&printers[0].id||"");
   const [fN,setFN]=useState("");const [tN,setTN]=useState(""),[tSe,setTSe]=useState("4"),[tF,setTF]=useState(floors[0]&&floors[0].id);
   const [wN,setWN]=useState(""),[wPin,setWPin]=useState(""),[wRole,setWRole]=useState("waiter");
-  const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);
+  const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);const [pVat,setPVat]=useState("13");
   return(<div style={{display:"grid",gap:20,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
-    <div style={{gridColumn:mob?"auto":"1 / -1"}}>
-      <Title>Shop details (printed on the customer receipt)</Title>
-      <div style={{...CARD,display:"grid",gap:10,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
-        <ShopField label="Business name" field="name" val={state.shop.name}/>
-        <ShopField label="Address" field="address" val={state.shop.address}/>
-        <ShopField label="ΑΦΜ / VAT" field="vat" val={state.shop.vat}/>
-        <ShopField label="Tax office (ΔΟΥ)" field="taxOffice" val={state.shop.taxOffice}/>
-        <ShopField label="Phone" field="phone" val={state.shop.phone}/>
-      </div>
-    </div>
     <div>
       <Title>Menu ({menu.length})</Title>
       <div style={{...CARD,display:"grid",gap:8}}>
         <input placeholder="Product name" value={pN} onChange={(e)=>setPN(e.target.value)} style={INP}/>
         <div className="flex" style={{gap:8}}><input placeholder="Price" type="number" value={pP} onChange={(e)=>setPP(e.target.value)} style={{...INP,flex:1}}/><input placeholder="Category" value={pC} onChange={(e)=>setPC(e.target.value)} style={{...INP,flex:1}}/></div>
         <div className="flex" style={{gap:8}}><select value={pPr} onChange={(e)=>setPPr(e.target.value)} style={{...INP,flex:1}}><option value="">→ No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>→ {p.name}</option>)}</select>
-          <button className="btn" onClick={()=>{if(pN&&pP){act("addProduct",{name:pN,price:parseFloat(pP),cat:pC,printerId:pPr});setPN("");setPP("");}}} style={{display:"flex",alignItems:"center",gap:6,...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add</button></div>
+          <select value={pVat} onChange={(e)=>setPVat(e.target.value)} title="VAT rate" style={{...INP,width:92}}>{[0,6,13,24].map((v)=><option key={v} value={v}>VAT {v}%</option>)}</select>
+          <button className="btn" onClick={()=>{if(pN&&pP){act("addProduct",{name:pN,price:parseFloat(pP),cat:pC,printerId:pPr,vat:parseInt(pVat)});setPN("");setPP("");}}} style={{display:"flex",alignItems:"center",gap:6,...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add</button></div>
       </div>
       <div style={{display:"grid",gap:6}}>{menu.map((m)=>(<div key={m.id} className="flex ac" style={{...ROW,borderLeft:`3px solid ${catColor(m.cat)}`}}>
         <span style={{flex:1,fontSize:13}}>{m.name}</span>
-        <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:92}}><option value="">No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:80}}><option value="">No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select value={m.vat!=null?m.vat:13} onChange={(e)=>act("updateProduct",{id:m.id,patch:{vat:parseInt(e.target.value)}})} title="VAT" style={{...INP,padding:"4px 4px",fontSize:11.5,width:62}}>{[0,6,13,24].map((v)=><option key={v} value={v}>{v}%</option>)}</select>
         <span style={{fontFamily:MONO,color:C.amber,fontSize:13,width:50,textAlign:"right"}}>{euro(m.price)}</span>
         <button className="btn" onClick={()=>setOptProd(m)} title="Choices / extras (e.g. sugar, milk)" style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="sliders" size={13} color={m.options&&m.options.length?C.violet:C.mute}/></button>
         <button className="btn" onClick={()=>act("deleteProduct",{id:m.id})} style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>))}</div>
@@ -602,6 +609,19 @@ function Setup({state,mob}){
         <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}><b>Shows</b>: <i>Own items</i> = only what you route to it · <i>All except food</i> = every drink/other item, skipping food stations (this is your Bar) · <i>Everything</i> = one copy of the whole order (expo). <b>Food</b> marks a kitchen station so “All except food” knows to skip it. <b>Bill</b> = the customer receipt. Each non-Bill printer gets its own tab.</div>
       </div>
       <div style={{marginTop:8,borderTop:`1px solid ${C.line}`,paddingTop:16}}><button className="btn" onClick={()=>{if(confirm("Reset everything to demo defaults?"))act("reset",{});}} style={{...BIG,background:"transparent",border:`1px solid ${C.red}`,color:C.red,cursor:"pointer"}}>Reset all data to demo defaults</button></div>
+    </div>
+    <div style={{gridColumn:mob?"auto":"1 / -1"}}>
+      <Title>Shop details & business day</Title>
+      <div style={{...CARD,display:"grid",gap:10,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
+        <ShopField label="Business name" field="name" val={state.shop.name}/>
+        <ShopField label="Address" field="address" val={state.shop.address}/>
+        <ShopField label="ΑΦΜ / VAT" field="vat" val={state.shop.vat}/>
+        <ShopField label="Tax office (ΔΟΥ)" field="taxOffice" val={state.shop.taxOffice}/>
+        <ShopField label="Phone" field="phone" val={state.shop.phone}/>
+        <div><label style={{...LBL,display:"block",marginBottom:2}}>Business day starts at</label>
+          <select value={state.shop.dayStart!=null?state.shop.dayStart:5} onChange={(e)=>act("setShop",{dayStart:parseInt(e.target.value)})} style={{...INP,width:"100%"}}>{Array.from({length:12},(_,h)=>h).map((h)=><option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}</select></div>
+      </div>
+      <div style={{color:C.subtle,fontSize:11.5,marginTop:6}}>Sales after midnight but before this hour count on the <b>previous</b> working day — e.g. a 02:30 sale with a 05:00 start belongs to the day before. Shop name, address & ΑΦΜ print on the customer receipt.</div>
     </div>
     {optProd&&<ProductOptionsModal product={optProd} onClose={()=>setOptProd(null)}/>}
   </div>);
