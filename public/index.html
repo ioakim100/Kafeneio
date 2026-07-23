@@ -239,10 +239,10 @@ function FloorPlan({tables,arrange,open,now,sel,onSelect,onPick}){
   useEffect(()=>{const el=ref.current;if(!el||!window.ResizeObserver)return;const ro=new ResizeObserver((es)=>setW(es[0].contentRect.width));ro.observe(el);return()=>ro.disconnect();},[]);
   const scale=Math.max(0.52,Math.min(1,w/780));           // shrink tables on narrow phones so they don't overlap
   const H=Math.max(340,Math.min(520,w*0.72));
-  const pct=(e)=>{const r=ref.current.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100};};
-  const down=(e,t)=>{if(!arrange)return;e.currentTarget.setPointerCapture(e.pointerId);const p=pct(e);drag.current={id:t.id,dx:t.x-p.x,dy:t.y-p.y,moved:false};};
-  const move=(e)=>{if(!drag.current)return;const p=pct(e);let x=Math.max(7,Math.min(93,p.x+drag.current.dx)),y=Math.max(9,Math.min(91,p.y+drag.current.dy));drag.current.moved=true;setLocal((l)=>({...l,[drag.current.id]:{x,y}}));};
-  const up=(t)=>{if(drag.current){const d=drag.current;drag.current=null;if(d.moved){const pos=local[d.id];if(pos)act("moveTable",{tableId:d.id,x:pos.x,y:pos.y});}else if(arrange)onSelect(t.id);}};
+  const pct=(e)=>{const el=ref.current;if(!el)return null;const r=el.getBoundingClientRect();if(!r.width||!r.height)return null;return{x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100};};
+  const down=(e,t)=>{if(!arrange)return;try{e.currentTarget.setPointerCapture(e.pointerId);}catch{}const p=pct(e);if(!p)return;drag.current={id:t.id,dx:t.x-p.x,dy:t.y-p.y,moved:false};};
+  const move=(e)=>{const d=drag.current;if(!d)return;const p=pct(e);if(!p)return;const x=Math.max(7,Math.min(93,p.x+d.dx)),y=Math.max(9,Math.min(91,p.y+d.dy));d.moved=true;setLocal((l)=>({...l,[d.id]:{x,y}}));};
+  const up=(t)=>{const d=drag.current;if(!d)return;drag.current=null;if(d.moved){const pos=local[d.id];if(pos)act("moveTable",{tableId:d.id,x:pos.x,y:pos.y});}else if(arrange)onSelect(t.id);};
   return(<div ref={ref} style={{position:"relative",width:"100%",height:H,borderRadius:16,background:`radial-gradient(circle at 1px 1px, ${C.line} 1px, transparent 0) 0 0 / ${Math.round(26*scale)}px ${Math.round(26*scale)}px, ${C.plan}`,border:`1px solid ${C.line}`,overflow:"hidden",touchAction:arrange?"none":"auto"}}>
     {tables.length===0&&<div style={{position:"absolute",inset:0,display:"grid",placeItems:"center",color:C.subtle,fontSize:13}}>No tables on this floor.</div>}
     {tables.map((t)=>{const o=open[t.id];const st=tableStatus(o);const busy=st!=="free";const sc=STCOL[st];const size=Math.round(tsize(t)*scale);const pos=local[t.id]||{x:t.x,y:t.y};const selected=sel===t.id;const big=size>58;
@@ -778,7 +778,9 @@ const CARD={background:C.panel,borderRadius:12,border:`1px solid ${C.line}`,padd
 const ROW={gap:8,background:C.panel,borderRadius:8,padding:"8px 10px",border:`1px solid ${C.line}`};
 const LBL={fontSize:11,color:C.mute};
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+class ErrorBoundary extends React.Component{constructor(p){super(p);this.state={err:null};}static getDerivedStateFromError(e){return{err:e};}componentDidCatch(e){console.error(e);}render(){if(this.state.err)return(<Center><div style={{textAlign:"center",maxWidth:320}}><div style={{width:48,height:48,borderRadius:14,background:C.panel2,display:"grid",placeItems:"center",margin:"0 auto 14px"}}><Ico n="x" size={24} color={C.red}/></div><div style={{fontWeight:800,fontSize:16,marginBottom:6}}>Something glitched</div><div style={{color:C.mute,fontSize:13,marginBottom:16}}>The screen hit an error. Reload to continue — your data is safe on the server.</div><button className="btn" onClick={()=>location.reload()} style={{...BIG,justifyContent:"center",background:C.amber,color:C.ink,border:"none",fontWeight:800,cursor:"pointer"}}>Reload</button></div></Center>);return this.props.children;}}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App/></ErrorBoundary>);
 </script>
 </body>
 </html>
