@@ -24,6 +24,8 @@ const DATA_FILE = path.join(__dirname, "data.json");
 const PUBLIC = path.join(__dirname, "public");
 const uid = () => Math.random().toString(36).slice(2, 9);
 const round2 = (n) => Math.round(n * 100) / 100;
+const itemGross = (it) => round2((it.unit === "kg" ? it.price * (it.weight || 0) : it.price) * (it.qty || 1));
+const qtyStr = (it) => it.unit === "kg" ? `${it.weight || 0} kg` : `${it.qty} x`;
 
 /* ---------------- seed ---------------- */
 const SEED = {
@@ -114,7 +116,7 @@ function migrate() {
   state.tables.forEach((t) => { if (!t.size) t.size = "m"; if (!t.shape) t.shape = "square"; });
   // menu: station -> printerId
   const map = { kitchen: "pk", bar: "pb", none: "" };
-  state.menu.forEach((m) => { if (m.printerId === undefined) m.printerId = map[m.station] ?? "pb"; delete m.station; if (m.vat === undefined) m.vat = m.cat === "Cold Drinks" ? 24 : 13; });
+  state.menu.forEach((m) => { if (m.printerId === undefined) m.printerId = map[m.station] ?? "pb"; delete m.station; if (m.vat === undefined) m.vat = m.cat === "Cold Drinks" ? 24 : 13; if (m.unit === undefined) m.unit = "each"; });
   // waiters: role + ensure an admin exists
   state.waiters.forEach((w) => { if (!w.role) w.role = "waiter"; });
   if (!state.waiters.some((w) => w.role === "admin"))
@@ -125,12 +127,14 @@ function migrate() {
     if (it.printerId === undefined) { const m = state.menu.find((x) => x.id === it.id); it.printerId = m ? m.printerId : (map[it.station] ?? ""); }
     if (it.done === undefined) it.done = false;
     if (it.doneQty === undefined) it.doneQty = it.done ? it.qty : 0;
+    if (it.unit === undefined) it.unit = "each";
+    if (it.weight === undefined) it.weight = 0;
     if (it.sent === undefined) it.sent = true;
   }));
 }
 
 function save() { try { fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2)); } catch (e) { console.error("save failed", e); } }
-const orderTotal = (o) => round2((o.items || []).reduce((s, x) => s + x.price * x.qty, 0));
+const orderTotal = (o) => round2((o.items || []).reduce((s, x) => s + itemGross(x), 0));
 const waiterName = (id) => (state.waiters.find((w) => w.id === id) || {}).name || "—";
 const printerById = (id) => state.printers.find((p) => p.id === id);
 function printerReceives(pr, item) {
@@ -167,8 +171,8 @@ function buildTicket({ title, table, servedBy, items, total, payments, priced, w
   if (servedBy) p.push(L("Served by " + servedBy));
   p.push(L(new Date().toLocaleString()), B(CP.left), L("-".repeat(W)));
   for (const it of items) {
-    if (priced) p.push(col(`${it.qty} x ${it.name}`, "EUR " + (it.qty * it.price).toFixed(2)));
-    else p.push(B(CP.boldOn), L(`${it.qty} x ${it.name}`), B(CP.boldOff));
+    if (priced) p.push(col(`${qtyStr(it)} ${it.name}`, "EUR " + itemGross(it).toFixed(2)));
+    else p.push(B(CP.boldOn), L(`${qtyStr(it)} ${it.name}`), B(CP.boldOff));
     if (it.opts && it.opts.length) p.push(L("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / ")));
     if (it.note) p.push(L("   >> " + it.note));
   }
@@ -195,7 +199,7 @@ function ticketText({ title, table, servedBy, items, total, payments, priced, wi
   if (servedBy) out.push("Served by " + servedBy);
   out.push(new Date().toLocaleString(), line);
   for (const it of items) {
-    out.push(priced ? col(`${it.qty} x ${it.name}`, "EUR " + (it.qty * it.price).toFixed(2)) : `${it.qty} x ${it.name}`);
+    out.push(priced ? col(`${qtyStr(it)} ${it.name}`, "EUR " + itemGross(it).toFixed(2)) : `${qtyStr(it)} ${it.name}`);
     if (it.opts && it.opts.length) out.push("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / "));
     if (it.note) out.push("   >> " + it.note);
   }
@@ -218,7 +222,7 @@ function sendToPrinter(ip, port, buffer) {
 }
 async function printPrep(printer, tableName, waiterId, items) {
   const priced = !!printer.priced;
-  const total = priced ? round2(items.reduce((s, x) => s + x.price * x.qty, 0)) : undefined;
+  const total = priced ? round2(items.reduce((s, x) => s + itemGross(x), 0)) : undefined;
   const buf = buildTicket({ title: printer.name.toUpperCase(), table: tableName, servedBy: waiterName(waiterId), items, priced, total, width: printer.width, notLegal: priced });
   if (!printer.ip) return { name: printer.name, ok: false, reason: "no-ip" };
   try { await sendToPrinter(printer.ip, printer.port, buf); return { name: printer.name, ok: true }; }
@@ -234,7 +238,7 @@ async function printReceipt(sale) {
 /* ---------------- actions ---------------- */
 const ADMIN = new Set(["addProduct", "deleteProduct", "addFloor", "deleteFloor", "addTable", "deleteTable",
   "updateTable", "moveTable", "addPrinter", "updatePrinter", "deletePrinter", "setReceiptPrinter",
-  "addWaiter", "updateWaiter", "deleteWaiter", "reset", "setShop", "setSetting"]);
+  "addWaiter", "updateWaiter", "deleteWaiter", "reset", "setShop", "setSetting", "seedDemoSales"]);
 
 async function handleAction(type, payload = {}, waiterId) {
   const actor = state.waiters.find((w) => w.id === waiterId);
@@ -248,12 +252,13 @@ async function handleAction(type, payload = {}, waiterId) {
   switch (type) {
     case "addItem": {
       const o = state.open[p.tableId] || { items: [], openedAt: new Date().toISOString(), openedBy: waiterId, payments: [] };
-      const hasOpts = p.item.opts && p.item.opts.length;
-      const i = hasOpts ? -1 : o.items.findIndex((x) => x.id === p.item.id && !x.sent && !(x.opts && x.opts.length));
+      const noMerge = (p.item.opts && p.item.opts.length) || p.item.unit === "kg";
+      const i = noMerge ? -1 : o.items.findIndex((x) => x.id === p.item.id && !x.sent && !(x.opts && x.opts.length) && x.unit !== "kg");
       if (i >= 0) o.items[i].qty += 1;
-      else o.items.push({ ...p.item, opts: p.item.opts || null, lid: uid(), qty: 1, waiterId, sent: false, done: false, doneQty: 0, note: "" });
+      else o.items.push({ ...p.item, unit: p.item.unit || "each", weight: p.item.weight || 0, opts: p.item.opts || null, lid: uid(), qty: 1, waiterId, sent: false, done: false, doneQty: 0, note: "" });
       state.open[p.tableId] = o; break;
     }
+    case "setWeight": { const o = state.open[p.tableId]; if (o && o.items[p.index]) o.items[p.index].weight = Math.max(0, parseFloat(p.weight) || 0); break; }
     case "changeQty": { const o = state.open[p.tableId]; if (!o) break; const it = o.items[p.index]; if (it) { it.qty += p.delta; it.doneQty = Math.min(it.doneQty || 0, Math.max(0, it.qty)); it.done = it.qty > 0 && it.doneQty >= it.qty; } o.items = o.items.filter((x) => x.qty > 0); if (!o.items.length) delete state.open[p.tableId]; break; }
     case "removeItem": { const o = state.open[p.tableId]; if (!o) break; o.items.splice(p.index, 1); if (!o.items.length) delete state.open[p.tableId]; break; }
     case "setNote": { const o = state.open[p.tableId]; if (o && o.items[p.index]) o.items[p.index].note = p.note; break; }
@@ -307,7 +312,7 @@ async function handleAction(type, payload = {}, waiterId) {
     case "deleteTable": state.tables = state.tables.filter((t) => t.id !== p.id); break;
     case "addFloor": state.floors.push({ id: uid(), name: p.name }); break;
     case "deleteFloor": if (state.floors.length > 1) { state.floors = state.floors.filter((f) => f.id !== p.id); state.tables = state.tables.filter((t) => t.floorId !== p.id); } break;
-    case "addProduct": state.menu.push({ id: uid(), name: p.name, price: p.price, cat: p.cat, printerId: p.printerId || "", vat: p.vat != null ? p.vat : 13 }); break;
+    case "addProduct": state.menu.push({ id: uid(), name: p.name, price: p.price, cat: p.cat, printerId: p.printerId || "", vat: p.vat != null ? p.vat : 13, unit: p.unit === "kg" ? "kg" : "each" }); break;
     case "updateProduct": { const m = state.menu.find((x) => x.id === p.id); if (m) Object.assign(m, p.patch || {}); break; }
     case "deleteProduct": state.menu = state.menu.filter((m) => m.id !== p.id); break;
     case "addPrinter": state.printers.push({ id: uid(), name: p.name || "Printer", ip: p.ip || "", color: p.color || "#E8A23D" }); break;
@@ -316,6 +321,25 @@ async function handleAction(type, payload = {}, waiterId) {
     case "setReceiptPrinter": state.receiptPrinterId = p.id; break;
     case "setShop": state.shop = { ...state.shop, ...p }; break;
     case "setSetting": state.settings = { ...state.settings, ...p }; break;
+    case "seedDemoSales": {
+      const menu = state.menu.length ? state.menu : [{ id: "d", name: "Coffee", price: 2, vat: 13, printerId: "pb" }];
+      const ws = state.waiters.length ? state.waiters : [{ id: "w0" }];
+      const now = Date.now(); const out = [];
+      for (let d = 0; d < 365; d++) {
+        const orders = 1 + Math.floor(Math.random() * 3);
+        for (let k = 0; k < orders; k++) {
+          const nItems = 1 + Math.floor(Math.random() * 4); const items = [];
+          for (let j = 0; j < nItems; j++) { const m = menu[Math.floor(Math.random() * menu.length)]; items.push({ lid: uid(), id: m.id, name: m.name, price: m.price, vat: m.vat != null ? m.vat : 13, printerId: m.printerId || "", qty: 1 + Math.floor(Math.random() * 2), opts: null, note: "" }); }
+          const total = round2(items.reduce((s, x) => s + itemGross(x), 0));
+          const method = Math.random() < 0.5 ? "cash" : "card";
+          const w = ws[Math.floor(Math.random() * ws.length)];
+          const closedAt = new Date(now - d * 86400000 - Math.floor(Math.random() * 12 * 3600000)).toISOString();
+          out.push({ id: uid(), tableId: "demo", tableName: "T" + (1 + Math.floor(Math.random() * 20)), items, total, payments: [{ amount: total, method, waiterId: w.id, at: closedAt }], method, waiterId: w.id, closedAt, demo: true });
+        }
+      }
+      state.sales = out.concat(state.sales);
+      break;
+    }
     case "preview": {
       const o = state.open[p.tableId]; const t = state.tables.find((x) => x.id === p.tableId);
       const items = o ? o.items : [];
@@ -326,11 +350,11 @@ async function handleAction(type, payload = {}, waiterId) {
         if (pr.id === state.receiptPrinterId) continue;
         const its = prepBase.filter((x) => printerReceives(pr, x));
         if (!its.length) continue;
-        const total = pr.priced ? round2(its.reduce((s, x) => s + x.price * x.qty, 0)) : undefined;
+        const total = pr.priced ? round2(its.reduce((s, x) => s + itemGross(x), 0)) : undefined;
         prep.push({ name: pr.name, width: pr.width || "80", text: ticketText({ title: pr.name.toUpperCase(), table: t?.name, servedBy: waiterName(waiterId), items: its, priced: !!pr.priced, total, width: pr.width, notLegal: !!pr.priced }) });
       }
       const rp = printerById(state.receiptPrinterId);
-      const receipt = { name: rp ? rp.name : "Receipt", width: (rp && rp.width) || "80", text: ticketText({ title: "RECEIPT", table: t?.name, servedBy: waiterName(o ? (o.openedBy || waiterId) : waiterId), items, total: round2(items.reduce((s, x) => s + x.price * x.qty, 0)), payments: o ? o.payments : [], priced: true, width: rp && rp.width, shop: state.shop }) };
+      const receipt = { name: rp ? rp.name : "Receipt", width: (rp && rp.width) || "80", text: ticketText({ title: "RECEIPT", table: t?.name, servedBy: waiterName(o ? (o.openedBy || waiterId) : waiterId), items, total: round2(items.reduce((s, x) => s + itemGross(x), 0)), payments: o ? o.payments : [], priced: true, width: rp && rp.width, shop: state.shop }) };
       return { ok: true, preview: { prep, receipt } };
     }
     case "addWaiter": state.waiters.push({ id: uid(), name: p.name, color: p.color || "#E8A23D", role: ["admin", "manager", "waiter", "kitchen"].includes(p.role) ? p.role : "waiter", pin: p.pin || "" }); break;

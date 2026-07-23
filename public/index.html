@@ -44,7 +44,10 @@ const tsize=(t)=>SIZES[t.size||"m"][t.shape||"square"];
 
 const euro=(n)=>"€"+(Number(n)||0).toFixed(2);
 const round2=(n)=>Math.round(n*100)/100;
-const orderTotal=(o)=>round2((o?.items||[]).reduce((s,x)=>s+x.price*x.qty,0));
+const lineGross=(x)=>round2((x.unit==="kg"?x.price*(x.weight||0):x.price)*(x.qty||1));
+const perUnit=(x)=>x.unit==="kg"?round2(x.price*(x.weight||0)):x.price;
+const qtyLabel=(x)=>x.unit==="kg"?((x.weight||0)+" kg"):(x.qty+"×");
+const orderTotal=(o)=>round2((o?.items||[]).reduce((s,x)=>s+lineGross(x),0));
 const paidSum=(o)=>round2((o?.payments||[]).reduce((s,x)=>s+x.amount,0));
 const paidQtyMap=(o)=>{const m={};(o?.payments||[]).forEach(p=>(p.lines||[]).forEach(l=>{m[l.lid]=(m[l.lid]||0)+l.qty;}));return m;};
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -52,6 +55,10 @@ const optsText=(it)=>it&&it.opts&&it.opts.length?it.opts.map(o=>o.values.join(",
 const dayKey=(d)=>{const x=new Date(d);return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`;};
 let DAY_START=5;
 const bizDay=(d)=>{const t=(typeof d==="number"?d:new Date(d).getTime())-DAY_START*3600000;return dayKey(new Date(t));};
+const weekStartKey=(k)=>{const d=new Date(k+"T12:00:00");const off=(d.getDay()+6)%7;d.setDate(d.getDate()-off);return dayKey(d);};
+const fmtDShort=(k)=>new Date(k+"T12:00:00").toLocaleDateString("en-GB",{day:"2-digit",month:"short"});
+const fmtMonthLabel=(mk)=>{const[y,m]=mk.split("-");return new Date(+y,+m-1,1).toLocaleString("en-US",{month:"long",year:"numeric"});};
+const fmtDayLabel=(k)=>new Date(k+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"});
 const relTime=(iso,now)=>{if(!iso)return"";const s=Math.max(0,Math.floor((now-new Date(iso).getTime())/1000));if(s<60)return"just now";const m=Math.floor(s/60);if(m<60)return m+" min";return Math.floor(m/60)+"h "+(m%60)+"m";};
 const tableStatus=(o)=>{if(!o||!o.items.length)return"free";if(o.items.some(x=>!x.sent))return"new";if(o.items.some(x=>x.sent&&!x.done))return"prep";return"served";};
 
@@ -160,9 +167,9 @@ function App(){
         {view==="setup"&&isAdmin&&<Setup state={state} mob={mob}/>}
       </div>
       {active&&<OrderScreen table={active} order={activeOrder} menu={state.menu} wname={wname} mob={mob}
-        onAdd={(m,opts)=>act("addItem",{tableId:active.id,item:{id:m.id,name:m.name,price:m.price,printerId:m.printerId,vat:m.vat,opts:opts||null}})}
+        onAdd={(m,opts,weight)=>act("addItem",{tableId:active.id,item:{id:m.id,name:m.name,price:m.price,printerId:m.printerId,vat:m.vat,unit:m.unit,weight:weight||null,opts:opts||null}})}
         onQty={(i,d)=>act("changeQty",{tableId:active.id,index:i,delta:d})} onRemove={(i)=>act("removeItem",{tableId:active.id,index:i})}
-        onNote={(i,note)=>act("setNote",{tableId:active.id,index:i,note})} onClose={()=>setActiveId(null)}
+        onNote={(i,note)=>act("setNote",{tableId:active.id,index:i,note})} onWeight={(i,weight)=>act("setWeight",{tableId:active.id,index:i,weight})} onClose={()=>setActiveId(null)}
         onPlace={()=>onPlace(active)} onBill={()=>onBill(active)} onPay={()=>setPayId(active.id)}
         onPreview={async()=>{const r=await act("preview",{tableId:active.id});if(r&&r.preview)setPreview({table:active.name,...r.preview});}}/>}
       {preview&&<PreviewModal data={preview} onClose={()=>setPreview(null)}/>}
@@ -270,7 +277,7 @@ function Orders({open,tables,floors,now,onPick,onPay,waiter}){
   const mine=(r)=>seesAll||r.o.openedBy===waiter.id;
   const list=Object.entries(open).map(([tid,o])=>{const t=tables.find((x)=>x.id===tid);const f=floors.find((x)=>x.id===(t&&t.floorId));return{tid,t,floor:f&&f.name,o};}).filter((r)=>r.o.items.length&&mine(r)).sort((a,b)=>new Date(a.o.openedAt)-new Date(b.o.openedAt));
   return(<div><Title>{seesAll?"All open orders":"My open orders"}</Title><P>{seesAll?"Every table in service — all items together. Tap a card to edit it, or hit Pay to charge it straight away.":"The tables you opened. Tap to edit, or hit Pay to charge. Other waiters' tables show on the Floor."}</P>
-    {list.length===0?<Empty>{seesAll?"No tables are open right now.":"You have no open tables. Open one from the Floor."}</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))"}}>
+    {list.length===0?<Empty>{seesAll?"No tables are open right now.":"You have no open tables. Open one from the Floor."}</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",alignItems:"start"}}>
       {list.map((r)=>{const total=orderTotal(r.o);const paid=paidSum(r.o);const st=tableStatus(r.o);const pmap=paidQtyMap(r.o);
         const isServed=(x)=>(x.doneQty||0)>=x.qty&&x.qty>0;
         const allSent=[...new Set(r.o.items.filter((x)=>x.sent).map((x)=>x.placedAt||"sent"))].sort();
@@ -283,13 +290,13 @@ function Orders({open,tables,floors,now,onPick,onPay,waiter}){
         if(served.length)rounds.push({label:"Served — ready to pay",servedGroup:true,items:served});
         const undelivered=r.o.items.filter((x)=>x.sent&&(x.doneQty||0)<x.qty);
         const itemRow=(x)=>{const pq=pmap[x.lid]||0;const dn=isServed(x);return(<div key={x.lid}>
-          <div className="flex ac" style={{gap:7,padding:"3px 0",fontSize:13}}><Dot pid={x.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span>{dn&&<Ico n="check" size={13} color={C.green}/>}{!x.sent&&<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}{pq>0&&<span style={{fontSize:9,fontWeight:800,color:C.ink,background:C.green,borderRadius:4,padding:"0 4px"}}>{pq>=x.qty?"PAID":`PAID ${pq}/${x.qty}`}</span>}<span style={{fontFamily:MONO,color:C.mute,fontSize:12}}>{euro(x.price*x.qty)}</span></div>
+          <div className="flex ac" style={{gap:7,padding:"3px 0",fontSize:13}}><Dot pid={x.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:34}}>{qtyLabel(x)}</span><span style={{flex:1}}>{x.name}</span>{dn&&<Ico n="check" size={13} color={C.green}/>}{!x.sent&&<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}{pq>0&&<span style={{fontSize:9,fontWeight:800,color:C.ink,background:C.green,borderRadius:4,padding:"0 4px"}}>{pq>=x.qty?"PAID":`PAID ${pq}/${x.qty}`}</span>}<span style={{fontFamily:MONO,color:C.mute,fontSize:12}}>{euro(lineGross(x))}</span></div>
           {x.opts&&x.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(x)}</div>}{x.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {x.note}</div>}</div>);};
         return(
-        <div key={r.tid} className="btn" onClick={()=>onPick(r.t)} style={{display:"flex",flexDirection:"column",height:252,overflow:"hidden",textAlign:"left",background:C.panel,border:`1px solid ${C.line}`,borderTop:`3px solid ${STCOL[st]}`,borderRadius:14,padding:14,color:C.text,cursor:"pointer"}}>
+        <div key={r.tid} className="btn" onClick={()=>onPick(r.t)} style={{display:"flex",flexDirection:"column",textAlign:"left",background:C.panel,border:`1px solid ${C.line}`,borderTop:`3px solid ${STCOL[st]}`,borderRadius:14,padding:14,color:C.text,cursor:"pointer"}}>
           <div className="flex ac jb"><span style={{fontWeight:800,fontSize:17}}>{r.t.name}</span><span className="flex ac" style={{gap:4,fontSize:11,color:C.mute,fontFamily:MONO}}><Ico n="clock" size={11}/> {relTime(r.o.openedAt,now)}</span></div>
           <div className="flex ac wrap" style={{gap:8,marginTop:2}}><span style={{fontSize:11,color:C.subtle}}>{r.floor}</span><span style={{fontSize:10,fontWeight:700,color:STCOL[st],textTransform:"uppercase"}}>· {STLABEL[st]}</span>{r.o.openedBy&&<span className="flex ac" style={{gap:4,fontSize:11,color:C.text,fontWeight:600}}><span style={{width:9,height:9,borderRadius:9,background:wColor(r.o.openedBy)}}/>{wLabel(r.o.openedBy)}</span>}</div>
-          <div style={{flex:1,minHeight:0,overflowY:"auto",margin:"10px 0 0",borderTop:`1px solid ${C.line}`,paddingTop:8}}>
+          <div style={{margin:"10px 0 0",borderTop:`1px solid ${C.line}`,paddingTop:8}}>
           {rounds.map((g,gi)=>(<div key={gi} style={{marginBottom:8}}><div className="flex ac jb" style={{fontSize:10,fontWeight:800,letterSpacing:.5,textTransform:"uppercase",color:g.isNew?C.amber:g.servedGroup?C.green:C.blue,marginBottom:2}}><span className="flex ac" style={{gap:4}}>{g.servedGroup&&<Ico n="check" size={12} color={C.green}/>}{g.label}</span>{g.time&&<span style={{fontFamily:MONO,fontWeight:600,color:C.subtle}}>{new Date(g.time).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</span>}</div>{g.items.map(itemRow)}</div>))}
           </div>
           <div className="flex ac" style={{margin:"10px 0 0",borderTop:`1px dashed ${C.line}`,paddingTop:10,gap:8}}>
@@ -318,7 +325,7 @@ function Prep({printer,receiptId,open,tables,floors,now}){
       {tickets.map((t)=>(<div key={t.tid} className="pop" style={{display:"flex",flexDirection:"column",minHeight:150,background:C.paper,borderRadius:12,padding:14,color:"#2A231A",fontFamily:MONO,boxShadow:`0 2px 0 ${C.paperLine}`,borderTop:`4px solid ${printer.color}`}}>
         <div className="flex ac jb" style={{borderBottom:`1.5px dashed ${C.paperLine}`,paddingBottom:8}}><div><div style={{fontWeight:800,fontSize:16,fontFamily:SANS}}>{t.name}</div><div style={{fontSize:10.5}}>{t.floor} · {relTime(t.openedAt,now)}{t.openedBy?" · "+wLabel(t.openedBy):""}</div></div>{t.openedBy&&<span title={wLabel(t.openedBy)} style={{width:18,height:18,borderRadius:18,background:wColor(t.openedBy),display:"grid",placeItems:"center",fontSize:10,fontWeight:800,color:"#241D14"}}>{(wLabel(t.openedBy)[0]||"").toUpperCase()}</span>}</div>
         <div style={{padding:"6px 0"}}>{t.items.map((x)=>{const done=x.doneQty||0;const left=x.qty-done;return(<button key={x.lid} className="btn" onClick={()=>act("setDoneQty",{tableId:t.tid,lid:x.lid,qty:done+1})} title="tap to deliver one" style={{width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"6px 0",cursor:"pointer",color:"#2A231A",borderBottom:`1px dotted ${C.paperLine}`}}>
-          <div className="flex ac" style={{gap:8,fontSize:14}}><Ico n="circle" size={17} color="#B08A55"/><span style={{fontWeight:800}}>{left}×</span><span style={{flex:1}}>{x.name}</span>{done>0&&<span style={{fontSize:11,fontWeight:800,color:"#2E7D4F"}}>{done}/{x.qty} done</span>}</div>
+          <div className="flex ac" style={{gap:8,fontSize:14}}><Ico n="circle" size={17} color="#B08A55"/><span style={{fontWeight:800}}>{x.unit==="kg"?(x.weight||0)+" kg":left+"×"}</span><span style={{flex:1}}>{x.name}</span>{done>0&&x.unit!=="kg"&&<span style={{fontSize:11,fontWeight:800,color:"#2E7D4F"}}>{done}/{x.qty} done</span>}</div>
           {x.opts&&x.opts.length>0&&<div style={{fontSize:14,fontWeight:800,color:"#5E2A86",background:"#EAD7F5",borderRadius:7,padding:"4px 9px",margin:"5px 0 0 25px"}}>{optsText(x)}</div>}
           {x.note&&<div style={{fontSize:14,fontWeight:800,color:"#7A4A10",background:"#F4E3BE",borderRadius:7,padding:"4px 9px",margin:"5px 0 0 25px"}}>✎ {x.note}</div>}</button>);})}</div>
         <button className="btn" onClick={()=>act("bumpList",{tableId:t.tid,lids:t.items.map((x)=>x.lid)})} style={{width:"100%",marginTop:"auto",background:"#2A231A",color:C.paper,border:"none",borderRadius:8,padding:"9px 0",fontFamily:SANS,fontWeight:700,cursor:"pointer"}}>Deliver all</button>
@@ -333,7 +340,7 @@ function Prep({printer,receiptId,open,tables,floors,now}){
 }
 
 /* ---------- order screen (mobile-correct) ---------- */
-function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onClose,onPlace,onBill,onPay,onPreview}){
+function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onWeight,onClose,onPlace,onBill,onPay,onPreview}){
   const [cat,setCat]=useState("All");const [noteIdx,setNoteIdx]=useState(-1);const [noteVal,setNoteVal]=useState("");const [pane,setPane]=useState("menu");
   const cats=useMemo(()=>["All",...Array.from(new Set(menu.map((m)=>m.cat)))],[menu]);
   const shown=cat==="All"?menu:menu.filter((m)=>m.cat===cat);
@@ -341,13 +348,15 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onC
   const unsent=items.filter((x)=>!x.sent).length;const nItems=items.reduce((s,x)=>s+x.qty,0);
   const counts={};items.forEach((x)=>{if(!x.sent)counts[x.id]=(counts[x.id]||0)+x.qty;});
   const openNote=(i)=>{setNoteIdx(i);setNoteVal(items[i].note||"");};const saveNote=()=>{onNote(noteIdx,noteVal);setNoteIdx(-1);};
-  const [optProduct,setOptProduct]=useState(null);
-  const pick=(m)=>{if(m.options&&m.options.length)setOptProduct(m);else onAdd(m,null);};
+  const [optProduct,setOptProduct]=useState(null);const [wtProduct,setWtProduct]=useState(null);
+  const [wIdx,setWIdx]=useState(-1);const [wVal,setWVal]=useState("");
+  const openW=(i)=>{setWIdx(i);setWVal(String(items[i].weight||""));};const saveW=()=>{onWeight(wIdx,parseFloat(wVal)||0);setWIdx(-1);};
+  const pick=(m)=>{if(m.unit==="kg")setWtProduct(m);else if(m.options&&m.options.length)setOptProduct(m);else onAdd(m,null);};
   const showMenu=!mob||pane==="menu";const showOrder=!mob||pane==="order";
   const MenuPane=(<div style={{flex:1,minWidth:0,overflowY:"auto",borderRight:mob?"none":`1px solid ${C.line}`,padding:12}}>
     <div className="flex wrap" style={{gap:6,marginBottom:12}}>{cats.map((c)=>{const cc=c==="All"?C.amber:catColor(c);const on=cat===c;return(<button key={c} onClick={()=>setCat(c)} style={{padding:"6px 12px",borderRadius:20,fontSize:12.5,cursor:"pointer",border:`1px solid ${on?cc:C.line}`,background:on?cc:"transparent",color:on?C.ink:C.mute,fontWeight:on?700:500}}>{c}</button>);})}</div>
     <div style={{display:"grid",gap:8,gridTemplateColumns:`repeat(auto-fill,minmax(${mob?104:118}px,1fr))`}}>{shown.map((m)=>{const n=counts[m.id]||0;return(<button key={m.id} className="tile" onClick={()=>pick(m)} style={{position:"relative",textAlign:"left",background:C.panel,borderRadius:10,border:`1px solid ${C.line}`,borderTop:`3px solid ${catColor(m.cat)}`,padding:"10px 11px",color:C.text,cursor:"pointer"}}>
-      <div style={{fontSize:13,fontWeight:600,lineHeight:1.25}}>{m.name}</div><div className="flex ac jb" style={{marginTop:8}}><span style={{fontFamily:MONO,color:C.amber,fontSize:13}}>{euro(m.price)}</span><span className="flex ac" style={{gap:4}}>{m.options&&m.options.length>0&&<span style={{fontSize:8.5,fontWeight:800,color:C.violet}}>OPT</span>}<Dot pid={m.printerId}/></span></div>
+      <div style={{fontSize:13,fontWeight:600,lineHeight:1.25}}>{m.name}</div><div className="flex ac jb" style={{marginTop:8}}><span style={{fontFamily:MONO,color:C.amber,fontSize:13}}>{euro(m.price)}{m.unit==="kg"?"/kg":""}</span><span className="flex ac" style={{gap:4}}>{m.unit==="kg"&&<span style={{fontSize:8.5,fontWeight:800,color:C.blue}}>KG</span>}{m.options&&m.options.length>0&&<span style={{fontSize:8.5,fontWeight:800,color:C.violet}}>OPT</span>}<Dot pid={m.printerId}/></span></div>
       {n>0&&<span className="pop" style={{position:"absolute",top:-8,right:-8,minWidth:20,height:20,padding:"0 5px",borderRadius:10,background:C.amber,color:C.ink,fontSize:11,fontWeight:800,fontFamily:MONO,display:"grid",placeItems:"center"}}>{n}</span>}</button>);})}</div>
   </div>);
   const OrderPane=(<div style={{flex:1,minWidth:0,overflowY:"auto",padding:12}}>
@@ -356,10 +365,8 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onC
         <div className="flex ac" style={{gap:8}}><Dot pid={x.printerId}/>
           <div style={{flex:1,minWidth:0}}><div className="flex ac" style={{gap:6}}><span style={{fontSize:13.5,fontWeight:600}}>{x.name}</span>
             {x.sent?<span style={{fontSize:9,fontWeight:800,color:x.done?C.green:C.blue,border:`1px solid ${x.done?C.greenDim:C.blueDim}`,borderRadius:4,padding:"0 4px"}}>{x.done?"DONE":"SENT"}</span>:<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}{pq>0&&<span style={{fontSize:9,fontWeight:800,color:C.ink,background:C.green,borderRadius:4,padding:"1px 5px"}}>{pq>=x.qty?"PAID":`PAID ${pq}/${x.qty}`}</span>}</div>
-            <div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{euro(x.price)} · {wname(x.waiterId)}</div></div>
-          <button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button>
-          <span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span>
-          <button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button>
+            <div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{x.unit==="kg"?`${euro(x.price)}/kg = ${euro(lineGross(x))}`:euro(x.price)} · {wname(x.waiterId)}</div></div>
+          {x.unit==="kg"?(wIdx===i?<span className="flex ac" style={{gap:4}}><input autoFocus type="number" step="0.05" inputMode="decimal" value={wVal} onChange={(e)=>setWVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveW();}} style={{...INP,width:60,fontSize:12,padding:"6px 8px"}}/><span style={{fontSize:11,color:C.mute}}>kg</span><button className="btn" onClick={saveW} style={{...QTY,width:30,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></span>:<button className="btn" onClick={()=>openW(i)} title="tap to set kilos" style={{...CHIP,background:C.panel2,color:C.text,border:`1px solid ${C.line}`,fontFamily:MONO,padding:"7px 10px"}}>{x.weight||0} kg</button>):<React.Fragment><button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button><span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span><button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></React.Fragment>}
           <button className="btn" onClick={()=>openNote(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="note" size={13} color={x.note?C.blue:C.mute}/></button>
           <button className="btn" onClick={()=>onRemove(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>
         {x.opts&&x.opts.length>0&&<div style={{fontSize:13,fontWeight:700,color:C.violet,marginLeft:16,marginTop:3}}>↳ {optsText(x)}</div>}
@@ -385,7 +392,22 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onC
     </div>
   </div>
   {optProduct&&<OptionsModal product={optProduct} onCancel={()=>setOptProduct(null)} onConfirm={(opts)=>{onAdd(optProduct,opts);setOptProduct(null);}}/>}
+  {wtProduct&&<WeightModal product={wtProduct} onCancel={()=>setWtProduct(null)} onConfirm={(w)=>{onAdd(wtProduct,null,w);setWtProduct(null);}}/>}
   </Overlay>);
+}
+
+/* ---------- weight picker (kg products) ---------- */
+function WeightModal({product,onCancel,onConfirm}){
+  const [kg,setKg]=useState("");
+  const val=parseFloat(kg)||0;
+  return(<Overlay center onBackdrop={onCancel}><div style={{background:C.panel,borderRadius:16,padding:18,width:"100%",maxWidth:340,border:`1px solid ${C.line}`}}>
+    <div className="flex ac jb"><span style={{fontWeight:800,fontSize:16}}>{product.name}</span><button className="btn" onClick={onCancel} style={{...ICON,cursor:"pointer"}}><Ico n="x" size={18} color={C.mute}/></button></div>
+    <div style={{fontSize:12.5,color:C.mute,margin:"6px 0 12px"}}>Sold by weight · {euro(product.price)}/kg</div>
+    <div className="flex wrap" style={{gap:6,marginBottom:12}}>{[0.25,0.5,0.75,1,1.5,2].map((v)=>(<button key={v} className="btn" onClick={()=>setKg(String(v))} style={{...CHIP,background:val===v?C.amber:C.panel3,color:val===v?C.ink:C.text}}>{v} kg</button>))}</div>
+    <div className="flex ac" style={{gap:8,marginBottom:14}}><input autoFocus type="number" step="0.05" inputMode="decimal" value={kg} onChange={(e)=>setKg(e.target.value)} placeholder="0.00" style={{...INP,flex:1,fontFamily:MONO,fontSize:20,textAlign:"center"}}/><span style={{fontFamily:MONO,color:C.mute}}>kg</span></div>
+    <div className="flex ac jb" style={{marginBottom:14}}><span style={{color:C.mute,fontSize:12.5}}>Amount</span><span style={{fontFamily:MONO,fontWeight:800,color:C.amber,fontSize:20}}>{euro(round2(product.price*val))}</span></div>
+    <button className="btn" onClick={()=>{if(val>0)onConfirm(val);}} disabled={val<=0} style={{...BIG,width:"100%",justifyContent:"center",background:val>0?C.amber:C.panel2,color:val>0?C.ink:C.subtle,border:"none",fontWeight:800,cursor:val>0?"pointer":"default"}}><Ico n="plus" size={16} color={val>0?C.ink:C.subtle}/> Add to order</button>
+  </div></Overlay>);
 }
 
 /* ---------- options picker (order-taking) ---------- */
@@ -440,7 +462,7 @@ function PayModal({name,order,mob,onAdd,onCancel}){
   const [method,setMethod]=useState("cash");
   const [amount,setAmount]=useState(remaining.toFixed(2));
   useEffect(()=>{setAmount(remaining.toFixed(2));},[remaining]);
-  const selAmount=round2(lines.reduce((s,x)=>s+(sel[x.lid]||0)*x.price,0));
+  const selAmount=round2(lines.reduce((s,x)=>s+(sel[x.lid]||0)*perUnit(x),0));
   const anySel=Object.values(sel).some((q)=>q>0);
   const toggleLine=(x)=>setSel((s)=>({...s,[x.lid]:(s[x.lid]||0)>0?0:x.unpaid}));
   const bump=(x,d)=>setSel((s)=>({...s,[x.lid]:Math.max(0,Math.min(x.unpaid,(s[x.lid]||0)+d))}));
@@ -464,8 +486,8 @@ function PayModal({name,order,mob,onAdd,onCancel}){
           <div key={x.lid} style={{background:on?C.panel3:C.panel2,border:`1px solid ${on?C.green:C.line}`,borderRadius:12,padding:"9px 11px"}}>
             <div className="flex ac" style={{gap:11,cursor:"pointer"}} onClick={()=>toggleLine(x)}>
               <Toggle on={on}/>
-              <div style={{flex:1,minWidth:0}}><div style={{fontSize:13.5,fontWeight:600}}>{x.name}</div><div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{euro(x.price)}{x.unpaid>1?` · ${x.unpaid} left`:""}</div></div>
-              <span style={{fontFamily:MONO,fontWeight:800,color:on?C.green:C.mute,fontSize:14}}>{euro((on?q:x.unpaid)*x.price)}</span>
+              <div style={{flex:1,minWidth:0}}><div style={{fontSize:13.5,fontWeight:600}}>{x.name}{x.unit==="kg"?` · ${x.weight||0} kg`:""}</div><div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{euro(x.price)}{x.unit==="kg"?"/kg":""}{x.unpaid>1?` · ${x.unpaid} left`:""}</div></div>
+              <span style={{fontFamily:MONO,fontWeight:800,color:on?C.green:C.mute,fontSize:14}}>{euro((on?q:x.unpaid)*perUnit(x))}</span>
             </div>
             {on&&x.unpaid>1&&<div className="flex ac" style={{gap:8,marginTop:8,justifyContent:"flex-end"}}><span style={{fontSize:11,color:C.mute}}>How many?</span><button className="btn" onClick={()=>bump(x,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button><span style={{fontFamily:MONO,width:18,textAlign:"center",fontWeight:700}}>{q}</span><button className="btn" onClick={()=>bump(x,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></div>}
           </div>);})}</div>
@@ -511,7 +533,7 @@ function Receipt({data,onClose}){
       <div className="flex jb" style={{fontSize:12}}><span>{tableName}</span><span>{new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</span></div>
       {servedBy&&<div style={{fontSize:11}}>Served by {servedBy}</div>}
       <div style={{borderTop:`1px dashed ${C.paperLine}`,margin:"8px 0"}}/>
-      {items.map((x,i)=>(<div key={i}><div className="flex jb" style={{padding:"2px 0"}}><span>{x.qty}× {x.name}</span>{priced&&<span>{euro(x.price*x.qty)}</span>}</div>{x.opts&&x.opts.length>0&&<div style={{fontSize:11,color:"#6A4A8A"}}>↳ {optsText(x)}</div>}{x.note&&<div style={{fontSize:11,color:"#8A5A2A"}}>↳ {x.note}</div>}</div>))}
+      {items.map((x,i)=>(<div key={i}><div className="flex jb" style={{padding:"2px 0"}}><span>{qtyLabel(x)} {x.name}</span>{priced&&<span>{euro(lineGross(x))}</span>}</div>{x.opts&&x.opts.length>0&&<div style={{fontSize:11,color:"#6A4A8A"}}>↳ {optsText(x)}</div>}{x.note&&<div style={{fontSize:11,color:"#8A5A2A"}}>↳ {x.note}</div>}</div>))}
       {priced&&<React.Fragment><div style={{borderTop:`2px dashed ${C.paperLine}`,margin:"8px 0"}}/><div className="flex jb" style={{fontWeight:800,fontSize:15}}><span style={{fontFamily:SANS}}>TOTAL</span><span>{euro(total)}</span></div>{payments.map((p,i)=>(<div key={i} className="flex jb" style={{fontSize:12}}><span>{p.method==="card"?"Card/POS":"Cash"}</span><span>{euro(p.amount)}</span></div>))}{method==="split"&&<div style={{textAlign:"center",marginTop:8,fontSize:12,letterSpacing:1}}>· SPLIT BILL ·</div>}</React.Fragment>}
       <div style={{textAlign:"center",marginTop:12,fontSize:20}}>* * *</div>
     </div>
@@ -525,25 +547,25 @@ function Receipt({data,onClose}){
 /* ---------- reports ---------- */
 function Reports({sales,waiters}){
   const today=bizDay(Date.now());
-  const [from,setFrom]=useState(today);const [to,setTo]=useState(today);const [openIds,setOpenIds]=useState({});
+  const [from,setFrom]=useState(today);const [to,setTo]=useState(today);const [openIds,setOpenIds]=useState({});const [gexp,setGexp]=useState({});
   const list=useMemo(()=>sales.filter((s)=>{const d=bizDay(s.closedAt);return d>=from&&d<=to;}),[sales,from,to]);
   const gross=round2(list.reduce((s,x)=>s+x.total,0));
   const agg=useMemo(()=>{let net=0,vat=0;const rate={},prod={},wmap={},pay={cash:0,card:0};
     list.forEach((s)=>{
-      s.items.forEach((it)=>{const g=it.price*it.qty;const r=it.vat!=null?it.vat:0;const n=g/(1+r/100);net+=n;vat+=g-n;
+      s.items.forEach((it)=>{const g=lineGross(it);const r=it.vat!=null?it.vat:0;const n=g/(1+r/100);net+=n;vat+=g-n;
         const e=rate[r]||{rate:r,gross:0,net:0,vat:0};e.gross+=g;e.net+=n;e.vat+=g-n;rate[r]=e;
         const pe=prod[it.name]||{name:it.name,qty:0,rev:0};pe.qty+=it.qty;pe.rev+=g;prod[it.name]=pe;});
       const wn=(waiters.find((w)=>w.id===s.waiterId)||{}).name||"—";wmap[wn]=wmap[wn]||{name:wn,gross:0,tx:0};wmap[wn].gross+=s.total;wmap[wn].tx+=1;
       const ps=s.payments&&s.payments.length?s.payments:[{amount:s.total,method:s.method}];ps.forEach((p)=>{pay[p.method==="card"?"card":"cash"]+=p.amount;});
     });
-    return {net:round2(net),vat:round2(vat),rates:Object.values(rate).sort((a,b)=>a.rate-b.rate),products:Object.values(prod).sort((a,b)=>b.rev-a.rev),waiterRows:Object.values(wmap).sort((a,b)=>b.gross-a.gross),cash:round2(pay.cash),card:round2(pay.card)};
+    return {net:round2(net),vat:round2(vat),rates:Object.values(rate).sort((a,b)=>a.rate-b.rate),products:Object.values(prod).sort((a,b)=>b.qty-a.qty||b.rev-a.rev),waiterRows:Object.values(wmap).sort((a,b)=>b.gross-a.gross),cash:round2(pay.cash),card:round2(pay.card)};
   },[list,waiters]);
   const setRange=(f,t)=>{setFrom(f);setTo(t);};
   const yday=()=>bizDay(Date.now()-24*3600000);
   const monthStart=()=>{const d=new Date();return dayKey(new Date(d.getFullYear(),d.getMonth(),1));};
   return(<div>
     <div className="flex ac jb wrap" style={{gap:10,marginBottom:8}}><Title>Sales report</Title>
-      <button className="btn" onClick={()=>window.print()} style={{display:"flex",alignItems:"center",gap:7,...SMALL,background:C.panel3,color:C.text,cursor:"pointer"}}><Ico n="printer" size={15}/> Print</button></div>
+      <div className="flex" style={{gap:8}}><button className="btn" onClick={()=>{if(confirm("Add ~1 year of random demo sales for testing? Use Reset later to clear them."))act("seedDemoSales",{});}} style={{display:"flex",alignItems:"center",gap:7,...SMALL,background:C.panel2,border:`1px solid ${C.line}`,color:C.mute,cursor:"pointer"}}><Ico n="plus" size={15}/> Demo data</button><button className="btn" onClick={()=>window.print()} style={{display:"flex",alignItems:"center",gap:7,...SMALL,background:C.panel3,color:C.text,cursor:"pointer"}}><Ico n="printer" size={15}/> Print</button></div></div>
     <div className="flex ac wrap" style={{gap:10,marginBottom:14}}>
       <label style={{fontSize:12,color:C.mute}}>From <input type="date" value={from} max={to} onChange={(e)=>setFrom(e.target.value)} style={{...INP,padding:"7px 9px",colorScheme:"dark"}}/></label>
       <label style={{fontSize:12,color:C.mute}}>To <input type="date" value={to} min={from} onChange={(e)=>setTo(e.target.value)} style={{...INP,padding:"7px 9px",colorScheme:"dark"}}/></label>
@@ -563,8 +585,15 @@ function Reports({sales,waiters}){
     </div>
     <div style={{marginTop:18}}>
       <div className="flex ac jb" style={{marginBottom:8}}><Title>Paid orders</Title><span style={{fontSize:12,color:C.mute,fontFamily:MONO}}>{list.length} ticket{list.length===1?"":"s"}</span></div>
-      {list.length===0?<Empty>No paid orders in this range.</Empty>:(<div style={{display:"grid",gap:8}}>
-        {[...list].sort((a,b)=>new Date(b.closedAt)-new Date(a.closedAt)).map((s)=>{const opn=!!openIds[s.id];const mc=s.method==="cash"?C.green:s.method==="split"?C.violet:C.amber;return(
+      {(()=>{
+        if(list.length===0)return <Empty>No paid orders in this range.</Empty>;
+        const sorted=[...list].sort((a,b)=>new Date(b.closedAt)-new Date(a.closedAt));
+        const spanDays=Math.round((Date.parse(to)-Date.parse(from))/86400000)+1;
+        const bucket=(arr,keyFn)=>{const m={};arr.forEach((s)=>{const k=keyFn(s);(m[k]=m[k]||[]).push(s);});return Object.keys(m).sort().reverse().map((k)=>({key:k,items:m[k]}));};
+        const sumOf=(arr)=>round2(arr.reduce((a,x)=>a+x.total,0));
+        const dayOf=(s)=>bizDay(s.closedAt);
+        const distinctDays=new Set(sorted.map(dayOf)).size;
+        const orderCard=(s)=>{const opn=!!openIds[s.id];const mc=s.method==="cash"?C.green:s.method==="split"?C.violet:C.amber;return(
           <div key={s.id} style={{background:C.panel,border:`1px solid ${C.line}`,borderRadius:12,overflow:"hidden"}}>
             <button className="btn" onClick={()=>setOpenIds((o)=>({...o,[s.id]:!o[s.id]}))} style={{width:"100%",textAlign:"left",background:"transparent",border:"none",color:C.text,cursor:"pointer",padding:"11px 13px",display:"flex",alignItems:"center",gap:10}}>
               <span style={{fontFamily:MONO,fontSize:12,color:C.mute,width:88}}>{new Date(s.closedAt).toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit"})} {new Date(s.closedAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</span>
@@ -575,11 +604,21 @@ function Reports({sales,waiters}){
               <span style={{color:C.subtle,transform:opn?"rotate(90deg)":"none",transition:"transform .12s",display:"flex"}}><Ico n="right" size={16}/></span>
             </button>
             {opn&&<div style={{padding:"0 13px 12px",borderTop:`1px solid ${C.line}`}}>
-              <div style={{padding:"8px 0"}}>{s.items.map((it,i)=>(<div key={i}><div className="flex ac" style={{gap:7,fontSize:12.5,padding:"2px 0"}}><Dot pid={it.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{it.qty}×</span><span style={{flex:1}}>{it.name}</span>{it.vat!=null&&<span style={{fontSize:10,color:C.subtle,fontFamily:MONO}}>{it.vat}%</span>}<span style={{fontFamily:MONO,color:C.mute}}>{euro(it.price*it.qty)}</span></div>{it.opts&&it.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(it)}</div>}{it.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {it.note}</div>}</div>))}</div>
+              <div style={{padding:"8px 0"}}>{s.items.map((it,i)=>(<div key={i}><div className="flex ac" style={{gap:7,fontSize:12.5,padding:"2px 0"}}><Dot pid={it.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:34}}>{qtyLabel(it)}</span><span style={{flex:1}}>{it.name}</span>{it.vat!=null&&<span style={{fontSize:10,color:C.subtle,fontFamily:MONO}}>{it.vat}%</span>}<span style={{fontFamily:MONO,color:C.mute}}>{euro(lineGross(it))}</span></div>{it.opts&&it.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(it)}</div>}{it.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {it.note}</div>}</div>))}</div>
               {s.payments&&s.payments.length>0&&<div style={{borderTop:`1px dashed ${C.line}`,paddingTop:6}}>{s.payments.map((p,i)=>(<div key={i} className="flex ac jb" style={{fontSize:12,color:C.mute,padding:"1px 0"}}><span className="flex ac" style={{gap:5}}><Ico n={p.method==="card"?"card":"cash"} size={12} color={C.mute}/>{p.method==="card"?"Card/POS":"Cash"}{p.lines?" · items":""}</span><span style={{fontFamily:MONO}}>{euro(p.amount)}</span></div>))}</div>}
             </div>}
-          </div>);})}
-      </div>)}
+          </div>);};
+        const GH=({id,label,count,sum,children})=>{const on=!!gexp[id];return(<div style={{border:`1px solid ${C.line}`,borderRadius:12,overflow:"hidden",marginBottom:8}}>
+          <button className="btn" onClick={()=>setGexp((g)=>({...g,[id]:!g[id]}))} style={{width:"100%",display:"flex",alignItems:"center",gap:10,background:C.panel2,border:"none",padding:"11px 13px",color:C.text,cursor:"pointer"}}>
+            <span style={{flex:1,textAlign:"left",fontWeight:700,fontSize:13.5}}>{label}</span><span style={{fontSize:11.5,color:C.mute,fontFamily:MONO}}>{count} tx</span><span style={{fontFamily:MONO,fontWeight:800,color:C.amber,fontSize:14}}>{euro(sum)}</span><span style={{color:C.subtle,transform:on?"rotate(90deg)":"none",transition:"transform .12s",display:"flex"}}><Ico n="right" size={16}/></span></button>
+          {on&&<div style={{padding:"8px 10px",display:"grid",gap:8}}>{children}</div>}
+        </div>);};
+        const dayGroups=(items,pfx)=>bucket(items,dayOf).map((dg)=>(<GH key={dg.key} id={pfx+"d"+dg.key} label={fmtDayLabel(dg.key)} count={dg.items.length} sum={sumOf(dg.items)}>{dg.items.map(orderCard)}</GH>));
+        if(distinctDays<=1)return <div style={{display:"grid",gap:8}}>{sorted.map(orderCard)}</div>;
+        if(spanDays<=8)return <div>{dayGroups(sorted,"")}</div>;
+        if(spanDays<=45)return <div>{bucket(sorted,(s)=>weekStartKey(dayOf(s))).map((wk)=>(<GH key={wk.key} id={"w"+wk.key} label={"Week of "+fmtDShort(wk.key)} count={wk.items.length} sum={sumOf(wk.items)}>{dayGroups(wk.items,"w"+wk.key)}</GH>))}</div>;
+        return <div>{bucket(sorted,(s)=>dayOf(s).slice(0,7)).map((mo)=>(<GH key={mo.key} id={"m"+mo.key} label={fmtMonthLabel(mo.key)} count={mo.items.length} sum={sumOf(mo.items)}>{bucket(mo.items,(s)=>weekStartKey(dayOf(s))).map((wk)=>(<GH key={wk.key} id={"m"+mo.key+"w"+wk.key} label={"Week of "+fmtDShort(wk.key)} count={wk.items.length} sum={sumOf(wk.items)}>{dayGroups(wk.items,"m"+mo.key+"w"+wk.key)}</GH>))}</GH>))}</div>;
+      })()}
     </div>
   </div>);
 }
@@ -594,7 +633,7 @@ function Setup({state,mob}){
   const [pN,setPN]=useState(""),[pP,setPP]=useState(""),[pC,setPC]=useState("Coffee"),[pPr,setPPr]=useState((printers.find((p)=>!p.food&&p.id!==receiptPrinterId)||printers[0]||{}).id||"");
   const [fN,setFN]=useState("");const [tN,setTN]=useState(""),[tSe,setTSe]=useState("4"),[tF,setTF]=useState(floors[0]&&floors[0].id);
   const [wN,setWN]=useState(""),[wPin,setWPin]=useState(""),[wRole,setWRole]=useState("waiter");
-  const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);const [pVat,setPVat]=useState("13");const [mq,setMq]=useState("");const [mexp,setMexp]=useState({});
+  const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);const [pVat,setPVat]=useState("13");const [pUnit,setPUnit]=useState("each");const [mq,setMq]=useState("");const [mexp,setMexp]=useState({});
   return(<div style={{display:"grid",gap:20,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
     <div>
       <Title>Menu ({menu.length})</Title>
@@ -603,13 +642,15 @@ function Setup({state,mob}){
         <div className="flex" style={{gap:8}}><input placeholder="Price" type="number" value={pP} onChange={(e)=>setPP(e.target.value)} style={{...INP,flex:1}}/><input placeholder="Category" value={pC} onChange={(e)=>setPC(e.target.value)} style={{...INP,flex:1}}/></div>
         <div className="flex" style={{gap:8}}><select value={pPr} onChange={(e)=>setPPr(e.target.value)} style={{...INP,flex:1}}><option value="">→ No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>→ {p.name}</option>)}</select>
           <select value={pVat} onChange={(e)=>setPVat(e.target.value)} title="VAT rate" style={{...INP,width:92}}>{[0,6,13,24].map((v)=><option key={v} value={v}>VAT {v}%</option>)}</select>
-          <button className="btn" onClick={()=>{if(pN&&pP){act("addProduct",{name:pN,price:parseFloat(pP),cat:pC,printerId:pPr,vat:parseInt(pVat)});setPN("");setPP("");}}} style={{display:"flex",alignItems:"center",gap:6,...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add</button></div>
+          <select value={pUnit} onChange={(e)=>setPUnit(e.target.value)} title="sold per item or per kilo" style={{...INP,width:96}}><option value="each">Per item</option><option value="kg">Per kg</option></select>
+          <button className="btn" onClick={()=>{if(pN&&pP){act("addProduct",{name:pN,price:parseFloat(pP),cat:pC,printerId:pPr,vat:parseInt(pVat),unit:pUnit});setPN("");setPP("");}}} style={{display:"flex",alignItems:"center",gap:6,...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add</button></div>
       </div>
       <div style={{display:"grid",gap:6}}>
         {(()=>{const rowEl=(m)=>(<div key={m.id} className="flex ac" style={{...ROW,borderLeft:`3px solid ${catColor(m.cat)}`}}>
           <span style={{flex:1,fontSize:13}}>{m.name}{!m.printerId&&<span title="No printer — this won't print or show on any Kitchen/Bar screen" style={{marginLeft:8,fontSize:9,fontWeight:800,color:C.red,border:`1px solid ${C.red}`,borderRadius:4,padding:"0 4px"}}>NO STATION</span>}</span>
           <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:80}}><option value="">No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
-          <select value={m.vat!=null?m.vat:13} onChange={(e)=>act("updateProduct",{id:m.id,patch:{vat:parseInt(e.target.value)}})} title="VAT" style={{...INP,padding:"4px 4px",fontSize:11.5,width:62}}>{[0,6,13,24].map((v)=><option key={v} value={v}>{v}%</option>)}</select>
+          <select value={m.vat!=null?m.vat:13} onChange={(e)=>act("updateProduct",{id:m.id,patch:{vat:parseInt(e.target.value)}})} title="VAT" style={{...INP,padding:"4px 4px",fontSize:11.5,width:56}}>{[0,6,13,24].map((v)=><option key={v} value={v}>{v}%</option>)}</select>
+          <select value={m.unit||"each"} onChange={(e)=>act("updateProduct",{id:m.id,patch:{unit:e.target.value}})} title="per item / per kg" style={{...INP,padding:"4px 4px",fontSize:11.5,width:64}}><option value="each">item</option><option value="kg">kg</option></select>
           <span style={{fontFamily:MONO,color:C.amber,fontSize:13,width:50,textAlign:"right"}}>{euro(m.price)}</span>
           <button className="btn" onClick={()=>setOptProd(m)} title="Choices / extras (e.g. sugar, milk)" style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="sliders" size={13} color={m.options&&m.options.length?C.violet:C.mute}/></button>
           <button className="btn" onClick={()=>act("deleteProduct",{id:m.id})} style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>);
