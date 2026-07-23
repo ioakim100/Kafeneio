@@ -561,7 +561,7 @@ function Setup({state,mob}){
   const [pN,setPN]=useState(""),[pP,setPP]=useState(""),[pC,setPC]=useState("Food"),[pPr,setPPr]=useState(printers[0]&&printers[0].id||"");
   const [fN,setFN]=useState("");const [tN,setTN]=useState(""),[tSe,setTSe]=useState("4"),[tF,setTF]=useState(floors[0]&&floors[0].id);
   const [wN,setWN]=useState(""),[wPin,setWPin]=useState(""),[wRole,setWRole]=useState("waiter");
-  const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);const [pVat,setPVat]=useState("13");
+  const [prN,setPrN]=useState(""),[prIp,setPrIp]=useState("");const [optProd,setOptProd]=useState(null);const [pVat,setPVat]=useState("13");const [mq,setMq]=useState("");const [mexp,setMexp]=useState({});
   return(<div style={{display:"grid",gap:20,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
     <div>
       <Title>Menu ({menu.length})</Title>
@@ -572,13 +572,25 @@ function Setup({state,mob}){
           <select value={pVat} onChange={(e)=>setPVat(e.target.value)} title="VAT rate" style={{...INP,width:92}}>{[0,6,13,24].map((v)=><option key={v} value={v}>VAT {v}%</option>)}</select>
           <button className="btn" onClick={()=>{if(pN&&pP){act("addProduct",{name:pN,price:parseFloat(pP),cat:pC,printerId:pPr,vat:parseInt(pVat)});setPN("");setPP("");}}} style={{display:"flex",alignItems:"center",gap:6,...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add</button></div>
       </div>
-      <div style={{display:"grid",gap:6}}>{menu.map((m)=>(<div key={m.id} className="flex ac" style={{...ROW,borderLeft:`3px solid ${catColor(m.cat)}`}}>
-        <span style={{flex:1,fontSize:13}}>{m.name}</span>
-        <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:80}}><option value="">No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <select value={m.vat!=null?m.vat:13} onChange={(e)=>act("updateProduct",{id:m.id,patch:{vat:parseInt(e.target.value)}})} title="VAT" style={{...INP,padding:"4px 4px",fontSize:11.5,width:62}}>{[0,6,13,24].map((v)=><option key={v} value={v}>{v}%</option>)}</select>
-        <span style={{fontFamily:MONO,color:C.amber,fontSize:13,width:50,textAlign:"right"}}>{euro(m.price)}</span>
-        <button className="btn" onClick={()=>setOptProd(m)} title="Choices / extras (e.g. sugar, milk)" style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="sliders" size={13} color={m.options&&m.options.length?C.violet:C.mute}/></button>
-        <button className="btn" onClick={()=>act("deleteProduct",{id:m.id})} style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>))}</div>
+      <div style={{display:"grid",gap:6}}>
+        {(()=>{const rowEl=(m)=>(<div key={m.id} className="flex ac" style={{...ROW,borderLeft:`3px solid ${catColor(m.cat)}`}}>
+          <span style={{flex:1,fontSize:13}}>{m.name}</span>
+          <select value={m.printerId||""} onChange={(e)=>act("updateProduct",{id:m.id,patch:{printerId:e.target.value}})} style={{...INP,padding:"4px 6px",fontSize:11.5,width:80}}><option value="">No printer</option>{printers.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <select value={m.vat!=null?m.vat:13} onChange={(e)=>act("updateProduct",{id:m.id,patch:{vat:parseInt(e.target.value)}})} title="VAT" style={{...INP,padding:"4px 4px",fontSize:11.5,width:62}}>{[0,6,13,24].map((v)=><option key={v} value={v}>{v}%</option>)}</select>
+          <span style={{fontFamily:MONO,color:C.amber,fontSize:13,width:50,textAlign:"right"}}>{euro(m.price)}</span>
+          <button className="btn" onClick={()=>setOptProd(m)} title="Choices / extras (e.g. sugar, milk)" style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="sliders" size={13} color={m.options&&m.options.length?C.violet:C.mute}/></button>
+          <button className="btn" onClick={()=>act("deleteProduct",{id:m.id})} style={{...ICON,width:28,height:28,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>);
+        if(mq.trim()){const q=mq.toLowerCase();const hits=menu.filter((m)=>m.name.toLowerCase().includes(q)||(m.cat||"").toLowerCase().includes(q));return(<React.Fragment><input autoFocus placeholder="Search products…" value={mq} onChange={(e)=>setMq(e.target.value)} style={{...INP,marginBottom:2}}/>{hits.length?hits.map(rowEl):<div style={{fontSize:12.5,color:C.subtle,padding:"6px 2px"}}>No matches.</div>}</React.Fragment>);}
+        const cats=[...new Set(menu.map((m)=>m.cat||"—"))];
+        return(<React.Fragment>
+          <div className="flex ac" style={{gap:8}}><input placeholder="Search products…" value={mq} onChange={(e)=>setMq(e.target.value)} style={{...INP,flex:1}}/><button className="btn" onClick={()=>{const all={};const anyOpen=cats.some((c)=>mexp[c]);cats.forEach((c)=>all[c]=!anyOpen);setMexp(all);}} style={{...CHIP,padding:"8px 10px",background:C.panel3,color:C.text}}>{cats.some((c)=>mexp[c])?"Collapse all":"Expand all"}</button></div>
+          {cats.map((c)=>{const items=menu.filter((m)=>(m.cat||"—")===c);const on=!!mexp[c];return(<div key={c} style={{border:`1px solid ${C.line}`,borderRadius:10,overflow:"hidden"}}>
+            <button className="btn" onClick={()=>setMexp((s)=>({...s,[c]:!s[c]}))} style={{width:"100%",display:"flex",alignItems:"center",gap:10,background:C.panel2,border:"none",padding:"10px 12px",color:C.text,cursor:"pointer"}}>
+              <span style={{width:9,height:9,borderRadius:9,background:catColor(c)}}/><span style={{flex:1,textAlign:"left",fontWeight:700,fontSize:13}}>{c}</span><span style={{fontSize:11.5,color:C.mute,fontFamily:MONO}}>{items.length}</span><span style={{color:C.subtle,transform:on?"rotate(90deg)":"none",transition:"transform .12s",display:"flex"}}><Ico n="right" size={16}/></span></button>
+            {on&&<div style={{display:"grid",gap:6,padding:8}}>{items.map(rowEl)}</div>}
+          </div>);})}
+        </React.Fragment>);})()}
+      </div>
     </div>
     <div>
       <Title>Users ({waiters.length})</Title>
