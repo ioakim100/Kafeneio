@@ -271,16 +271,31 @@ function Orders({open,tables,floors,now,onPick,onPay,waiter}){
   const list=Object.entries(open).map(([tid,o])=>{const t=tables.find((x)=>x.id===tid);const f=floors.find((x)=>x.id===(t&&t.floorId));return{tid,t,floor:f&&f.name,o};}).filter((r)=>r.o.items.length&&mine(r)).sort((a,b)=>new Date(a.o.openedAt)-new Date(b.o.openedAt));
   return(<div><Title>{seesAll?"All open orders":"My open orders"}</Title><P>{seesAll?"Every table in service — all items together. Tap a card to edit it, or hit Pay to charge it straight away.":"The tables you opened. Tap to edit, or hit Pay to charge. Other waiters' tables show on the Floor."}</P>
     {list.length===0?<Empty>{seesAll?"No tables are open right now.":"You have no open tables. Open one from the Floor."}</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))"}}>
-      {list.map((r)=>{const total=orderTotal(r.o);const paid=paidSum(r.o);const st=tableStatus(r.o);return(
+      {list.map((r)=>{const total=orderTotal(r.o);const paid=paidSum(r.o);const st=tableStatus(r.o);const pmap=paidQtyMap(r.o);
+        const isServed=(x)=>(x.doneQty||0)>=x.qty&&x.qty>0;
+        const allSent=[...new Set(r.o.items.filter((x)=>x.sent).map((x)=>x.placedAt||"sent"))].sort();
+        const roundNo=(k)=>allSent.indexOf(k)+1;
+        const groups={};r.o.items.filter((x)=>!isServed(x)).forEach((x)=>{const key=x.sent?(x.placedAt||"sent"):"__new";(groups[key]=groups[key]||[]).push(x);});
+        const sentKeys=Object.keys(groups).filter((k)=>k!=="__new").sort();
+        const rounds=sentKeys.map((k)=>({label:"Order "+roundNo(k)+" · preparing",time:k==="sent"?null:k,items:groups[k]}));
+        if(groups["__new"])rounds.push({label:"New — not sent",isNew:true,items:groups["__new"]});
+        const served=r.o.items.filter(isServed);
+        if(served.length)rounds.push({label:"Served — ready to pay",servedGroup:true,items:served});
+        const undelivered=r.o.items.filter((x)=>x.sent&&(x.doneQty||0)<x.qty);
+        const itemRow=(x)=>{const pq=pmap[x.lid]||0;const dn=isServed(x);return(<div key={x.lid}>
+          <div className="flex ac" style={{gap:7,padding:"3px 0",fontSize:13}}><Dot pid={x.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span>{dn&&<Ico n="check" size={13} color={C.green}/>}{!x.sent&&<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}{pq>0&&<span style={{fontSize:9,fontWeight:800,color:C.ink,background:C.green,borderRadius:4,padding:"0 4px"}}>{pq>=x.qty?"PAID":`PAID ${pq}/${x.qty}`}</span>}<span style={{fontFamily:MONO,color:C.mute,fontSize:12}}>{euro(x.price*x.qty)}</span></div>
+          {x.opts&&x.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(x)}</div>}{x.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {x.note}</div>}</div>);};
+        return(
         <div key={r.tid} className="btn" onClick={()=>onPick(r.t)} style={{display:"flex",flexDirection:"column",height:252,overflow:"hidden",textAlign:"left",background:C.panel,border:`1px solid ${C.line}`,borderTop:`3px solid ${STCOL[st]}`,borderRadius:14,padding:14,color:C.text,cursor:"pointer"}}>
           <div className="flex ac jb"><span style={{fontWeight:800,fontSize:17}}>{r.t.name}</span><span className="flex ac" style={{gap:4,fontSize:11,color:C.mute,fontFamily:MONO}}><Ico n="clock" size={11}/> {relTime(r.o.openedAt,now)}</span></div>
           <div className="flex ac wrap" style={{gap:8,marginTop:2}}><span style={{fontSize:11,color:C.subtle}}>{r.floor}</span><span style={{fontSize:10,fontWeight:700,color:STCOL[st],textTransform:"uppercase"}}>· {STLABEL[st]}</span>{r.o.openedBy&&<span className="flex ac" style={{gap:4,fontSize:11,color:C.text,fontWeight:600}}><span style={{width:9,height:9,borderRadius:9,background:wColor(r.o.openedBy)}}/>{wLabel(r.o.openedBy)}</span>}</div>
           <div style={{flex:1,minHeight:0,overflowY:"auto",margin:"10px 0 0",borderTop:`1px solid ${C.line}`,paddingTop:8}}>
-          {r.o.items.map((x,i)=>(<div key={i}><div className="flex ac" style={{gap:7,padding:"3px 0",fontSize:13,opacity:x.done?.5:1}}><Dot pid={x.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:22}}>{x.qty}×</span><span style={{flex:1}}>{x.name}</span>{!x.sent&&<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}<span style={{fontFamily:MONO,color:C.mute,fontSize:12}}>{euro(x.price*x.qty)}</span></div>{x.opts&&x.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(x)}</div>}{x.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {x.note}</div>}</div>))}
+          {rounds.map((g,gi)=>(<div key={gi} style={{marginBottom:8}}><div className="flex ac jb" style={{fontSize:10,fontWeight:800,letterSpacing:.5,textTransform:"uppercase",color:g.isNew?C.amber:g.servedGroup?C.green:C.blue,marginBottom:2}}><span className="flex ac" style={{gap:4}}>{g.servedGroup&&<Ico n="check" size={12} color={C.green}/>}{g.label}</span>{g.time&&<span style={{fontFamily:MONO,fontWeight:600,color:C.subtle}}>{new Date(g.time).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</span>}</div>{g.items.map(itemRow)}</div>))}
           </div>
-          <div className="flex ac" style={{margin:"10px 0 0",borderTop:`1px dashed ${C.line}`,paddingTop:10,gap:10}}>
-            <div style={{flex:1,minWidth:0}}><div style={{fontSize:10.5,color:C.mute}}>{paid>0?"Left to pay":"Total"}</div><div style={{fontFamily:MONO,fontSize:19,fontWeight:800,color:C.amber}}>{euro(total-paid)}</div></div>
-            <button className="btn" onClick={(e)=>{e.stopPropagation();onPay(r.t);}} style={{display:"flex",alignItems:"center",gap:7,padding:"10px 18px",borderRadius:10,background:C.green,border:"none",color:C.ink,fontWeight:800,fontSize:14,cursor:"pointer"}}><Ico n="check" size={16}/> Pay</button>
+          <div className="flex ac" style={{margin:"10px 0 0",borderTop:`1px dashed ${C.line}`,paddingTop:10,gap:8}}>
+            <div style={{flex:1,minWidth:0}}><div style={{fontSize:10.5,color:C.mute}}>{paid>0?"Left to pay":"Total"}</div><div style={{fontFamily:MONO,fontSize:18,fontWeight:800,color:C.amber}}>{euro(total-paid)}</div></div>
+            {undelivered.length>0&&<button className="btn" onClick={(e)=>{e.stopPropagation();act("bumpList",{tableId:r.tid,lids:undelivered.map((x)=>x.lid)});}} title="Mark everything as served" style={{display:"flex",alignItems:"center",gap:5,padding:"9px 11px",borderRadius:10,background:C.panel3,border:`1px solid ${C.line}`,color:C.text,fontWeight:700,fontSize:12.5,cursor:"pointer"}}><Ico n="check" size={15} color={C.green}/> Served</button>}
+            <button className="btn" onClick={(e)=>{e.stopPropagation();onPay(r.t);}} style={{display:"flex",alignItems:"center",gap:6,padding:"9px 14px",borderRadius:10,background:C.green,border:"none",color:C.ink,fontWeight:800,fontSize:13.5,cursor:"pointer"}}><Ico n="cash" size={16}/> Pay</button>
           </div>
         </div>);})}
     </div>)}
