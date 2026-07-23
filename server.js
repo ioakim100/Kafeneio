@@ -71,6 +71,7 @@ const SEED = {
     { id: "w1", name: "Maria", color: "#E8A23D", role: "waiter", pin: "1111" },
     { id: "w2", name: "Nikos", color: "#7BC49A", role: "waiter", pin: "2222" },
   ],
+  shop: { name: "Kafeneío", vat: "", taxOffice: "", address: "", phone: "" },
   open: {},
   sales: [],
 };
@@ -103,6 +104,8 @@ function migrate() {
   state.printers.forEach((p) => {
     if (p.mode === undefined) p.mode = p.all ? "all" : (/bar/i.test(p.name) ? "rest" : "own");
     if (p.food === undefined) p.food = /kitchen/i.test(p.name);
+    if (p.port === undefined) p.port = 9100;
+    if (p.width === undefined) p.width = "80";
   });
   // tables need a size
   state.tables.forEach((t) => { if (!t.size) t.size = "m"; if (!t.shape) t.shape = "square"; });
@@ -147,51 +150,59 @@ const CP = { init: [ESC, 0x40], boldOn: [ESC, 0x45, 1], boldOff: [ESC, 0x45, 0],
 const L = (s = "") => Buffer.from(s + "\n", "latin1");
 const B = (a) => Buffer.from(a);
 const cols = (l, r, w = 42) => L(String(l) + " ".repeat(Math.max(1, w - String(l).length - String(r).length)) + String(r));
-function buildTicket({ title, table, servedBy, items, total, payments, priced }) {
-  const p = [B(CP.init), B(CP.center), B(CP.big), B(CP.boldOn), L(title), B(CP.normal), B(CP.boldOff)];
+function buildTicket({ title, table, servedBy, items, total, payments, priced, width, shop }) {
+  const W = width === "58" ? 32 : 48;
+  const col = (l, r) => L(String(l) + " ".repeat(Math.max(1, W - String(l).length - String(r).length)) + String(r));
+  const p = [B(CP.init), B(CP.center), B(CP.big), B(CP.boldOn), L(priced && shop && shop.name ? shop.name : title), B(CP.normal), B(CP.boldOff)];
+  if (priced && shop) {                                   // business header on the customer bill
+    if (shop.address) p.push(L(shop.address));
+    const l2 = [shop.vat && ("AFM " + shop.vat), shop.taxOffice && ("DOY " + shop.taxOffice)].filter(Boolean).join("  ");
+    if (l2) p.push(L(l2));
+    if (shop.phone) p.push(L("Tel " + shop.phone));
+  }
   if (table) p.push(B(CP.boldOn), L("Table " + table), B(CP.boldOff));
   if (servedBy) p.push(L("Served by " + servedBy));
-  p.push(L(new Date().toLocaleString()), B(CP.left), L("-".repeat(42)));
+  p.push(L(new Date().toLocaleString()), B(CP.left), L("-".repeat(W)));
   for (const it of items) {
-    if (priced) p.push(cols(`${it.qty} x ${it.name}`, "EUR " + (it.qty * it.price).toFixed(2)));
+    if (priced) p.push(col(`${it.qty} x ${it.name}`, "EUR " + (it.qty * it.price).toFixed(2)));
     else p.push(B(CP.boldOn), L(`${it.qty} x ${it.name}`), B(CP.boldOff));
     if (it.opts && it.opts.length) p.push(L("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / ")));
     if (it.note) p.push(L("   >> " + it.note));
   }
   if (priced && typeof total === "number") {
-    p.push(L("-".repeat(42)), B(CP.big), B(CP.boldOn), cols("TOTAL", "EUR " + total.toFixed(2), 21), B(CP.normal), B(CP.boldOff));
+    p.push(L("-".repeat(W)), B(CP.big), B(CP.boldOn), col("TOTAL", "EUR " + total.toFixed(2)), B(CP.normal), B(CP.boldOff));
     for (const pay of payments || []) p.push(L(`  ${pay.method === "card" ? "Card/POS" : "Cash"}: EUR ${pay.amount.toFixed(2)}`));
   }
   p.push(B(CP.feed(1)), B(CP.center), L("* * *"), B(CP.left), B(CP.feed(3)), B(CP.cut));
   return Buffer.concat(p);
 }
-function sendToPrinter(ip, buffer) {
+function sendToPrinter(ip, port, buffer) {
   return new Promise((resolve, reject) => {
     if (!ip) return reject(new Error("no-ip"));
     const s = new net.Socket(); s.setTimeout(4000);
-    s.connect(9100, ip, () => s.write(buffer, () => s.end()));
+    s.connect(port || 9100, ip, () => s.write(buffer, () => s.end()));
     s.on("close", () => resolve(true));
     s.on("timeout", () => { s.destroy(); reject(new Error("offline")); });
     s.on("error", () => reject(new Error("offline")));
   });
 }
 async function printPrep(printer, tableName, waiterId, items) {
-  const buf = buildTicket({ title: printer.name.toUpperCase(), table: tableName, servedBy: waiterName(waiterId), items, priced: false });
+  const buf = buildTicket({ title: printer.name.toUpperCase(), table: tableName, servedBy: waiterName(waiterId), items, priced: false, width: printer.width });
   if (!printer.ip) return { name: printer.name, ok: false, reason: "no-ip" };
-  try { await sendToPrinter(printer.ip, buf); return { name: printer.name, ok: true }; }
+  try { await sendToPrinter(printer.ip, printer.port, buf); return { name: printer.name, ok: true }; }
   catch { return { name: printer.name, ok: false, reason: "offline" }; }
 }
 async function printReceipt(sale) {
   const pr = printerById(state.receiptPrinterId);
-  const buf = buildTicket({ title: "KAFENEIO", table: sale.tableName, servedBy: waiterName(sale.waiterId), items: sale.items, total: sale.total, payments: sale.payments, priced: true });
+  const buf = buildTicket({ title: "RECEIPT", table: sale.tableName, servedBy: waiterName(sale.waiterId), items: sale.items, total: sale.total, payments: sale.payments, priced: true, width: pr && pr.width, shop: state.shop });
   if (!pr || !pr.ip) return { ok: false, reason: "no-ip" };
-  try { await sendToPrinter(pr.ip, buf); return { ok: true }; } catch { return { ok: false, reason: "offline" }; }
+  try { await sendToPrinter(pr.ip, pr.port, buf); return { ok: true }; } catch { return { ok: false, reason: "offline" }; }
 }
 
 /* ---------------- actions ---------------- */
 const ADMIN = new Set(["addProduct", "deleteProduct", "addFloor", "deleteFloor", "addTable", "deleteTable",
   "updateTable", "moveTable", "addPrinter", "updatePrinter", "deletePrinter", "setReceiptPrinter",
-  "addWaiter", "updateWaiter", "deleteWaiter", "reset"]);
+  "addWaiter", "updateWaiter", "deleteWaiter", "reset", "setShop"]);
 
 async function handleAction(type, payload = {}, waiterId) {
   const actor = state.waiters.find((w) => w.id === waiterId);
@@ -264,6 +275,7 @@ async function handleAction(type, payload = {}, waiterId) {
     case "updatePrinter": { const pr = state.printers.find((x) => x.id === p.id); if (pr) Object.assign(pr, p.patch || {}); break; }
     case "deletePrinter": state.printers = state.printers.filter((x) => x.id !== p.id); if (state.receiptPrinterId === p.id) state.receiptPrinterId = ""; state.menu.forEach((m) => { if (m.printerId === p.id) m.printerId = ""; }); break;
     case "setReceiptPrinter": state.receiptPrinterId = p.id; break;
+    case "setShop": state.shop = { ...state.shop, ...p }; break;
     case "addWaiter": state.waiters.push({ id: uid(), name: p.name, color: p.color || "#E8A23D", role: p.role === "admin" ? "admin" : "waiter", pin: p.pin || "" }); break;
     case "updateWaiter": { const w = state.waiters.find((x) => x.id === p.id); if (w) Object.assign(w, p.patch || {}); break; }
     case "deleteWaiter": state.waiters = state.waiters.filter((w) => w.id !== p.id); break;
