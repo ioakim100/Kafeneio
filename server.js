@@ -72,6 +72,7 @@ const SEED = {
     { id: "w2", name: "Nikos", color: "#7BC49A", role: "waiter", pin: "2222" },
   ],
   shop: { name: "Kafeneío", vat: "", taxOffice: "", address: "", phone: "", dayStart: 5 },
+  settings: { autoPrintPrep: true, autoPrintReceipt: true, lockToOpener: false },
   open: {},
   sales: [],
 };
@@ -203,11 +204,16 @@ async function printReceipt(sale) {
 /* ---------------- actions ---------------- */
 const ADMIN = new Set(["addProduct", "deleteProduct", "addFloor", "deleteFloor", "addTable", "deleteTable",
   "updateTable", "moveTable", "addPrinter", "updatePrinter", "deletePrinter", "setReceiptPrinter",
-  "addWaiter", "updateWaiter", "deleteWaiter", "reset", "setShop"]);
+  "addWaiter", "updateWaiter", "deleteWaiter", "reset", "setShop", "setSetting"]);
 
 async function handleAction(type, payload = {}, waiterId) {
   const actor = state.waiters.find((w) => w.id === waiterId);
   if (ADMIN.has(type) && (!actor || actor.role !== "admin")) return { ok: false, error: "admin_only" };
+  const OWN = new Set(["addItem", "changeQty", "removeItem", "setNote", "placeOrder", "printBill", "pay"]);
+  if (state.settings && state.settings.lockToOpener && actor && actor.role === "waiter" && OWN.has(type)) {
+    const o = state.open[payload.tableId];
+    if (o && o.openedBy && o.openedBy !== actor.id) return { ok: false, error: "locked" };
+  }
   let print = null, sale = null; const p = payload;
   switch (type) {
     case "addItem": {
@@ -232,13 +238,15 @@ async function handleAction(type, payload = {}, waiterId) {
       newly.forEach((x) => { x.sent = true; x.placedAt = new Date().toISOString(); });
       const prepNewly = newly.filter((x) => x.printerId && x.printerId !== state.receiptPrinterId);
       const results = [];
-      for (const pr of state.printers) {
-        if (pr.id === state.receiptPrinterId) continue;
-        const items = prepNewly.filter((x) => printerReceives(pr, x));
-        if (!items.length) continue;
-        results.push(await printPrep(pr, t?.name, waiterId, items));
+      if (state.settings.autoPrintPrep) {
+        for (const pr of state.printers) {
+          if (pr.id === state.receiptPrinterId) continue;
+          const items = prepNewly.filter((x) => printerReceives(pr, x));
+          if (!items.length) continue;
+          results.push(await printPrep(pr, t?.name, waiterId, items));
+        }
       }
-      print = { ok: results.every((r) => r.ok), results, fired: newly.length };
+      print = { ok: results.every((r) => r.ok), results, fired: newly.length, muted: !state.settings.autoPrintPrep };
       break;
     }
     case "printBill": {
@@ -259,7 +267,7 @@ async function handleAction(type, payload = {}, waiterId) {
           method: methods.length > 1 ? "split" : methods[0], waiterId: o.openedBy || waiterId, closedAt: new Date().toISOString() };
         state.sales.unshift(sale);
         delete state.open[p.tableId];
-        print = await printReceipt(sale);
+        print = state.settings.autoPrintReceipt ? await printReceipt(sale) : { ok: false, reason: "off" };
       }
       break;
     }
@@ -277,7 +285,8 @@ async function handleAction(type, payload = {}, waiterId) {
     case "deletePrinter": state.printers = state.printers.filter((x) => x.id !== p.id); if (state.receiptPrinterId === p.id) state.receiptPrinterId = ""; state.menu.forEach((m) => { if (m.printerId === p.id) m.printerId = ""; }); break;
     case "setReceiptPrinter": state.receiptPrinterId = p.id; break;
     case "setShop": state.shop = { ...state.shop, ...p }; break;
-    case "addWaiter": state.waiters.push({ id: uid(), name: p.name, color: p.color || "#E8A23D", role: p.role === "admin" ? "admin" : "waiter", pin: p.pin || "" }); break;
+    case "setSetting": state.settings = { ...state.settings, ...p }; break;
+    case "addWaiter": state.waiters.push({ id: uid(), name: p.name, color: p.color || "#E8A23D", role: ["admin", "manager", "waiter", "kitchen"].includes(p.role) ? p.role : "waiter", pin: p.pin || "" }); break;
     case "updateWaiter": { const w = state.waiters.find((x) => x.id === p.id); if (w) Object.assign(w, p.patch || {}); break; }
     case "deleteWaiter": state.waiters = state.waiters.filter((w) => w.id !== p.id); break;
     case "reset": state = JSON.parse(JSON.stringify(SEED)); break;

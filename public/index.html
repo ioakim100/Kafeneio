@@ -59,6 +59,13 @@ let PRINTERS=[];
 const pColor=(id)=>{const p=PRINTERS.find(x=>x.id===id);return p?p.color:C.subtle;};
 const pName=(id)=>{const p=PRINTERS.find(x=>x.id===id);return p?p.name:"—";};
 let WAITERS=[];
+const ROLES={
+  admin:{label:"Admin",tabs:["floor","orders","prep","reports","setup"]},
+  manager:{label:"Floor manager",tabs:["floor","orders","prep"]},
+  waiter:{label:"Waiter",tabs:["floor","orders","prep"]},
+  kitchen:{label:"Kitchen / Bar",tabs:["orders","prep"]},
+};
+const roleLabel=(r)=>(ROLES[r]||ROLES.waiter).label;
 const wColor=(id)=>{const w=WAITERS.find(x=>x.id===id);return w?w.color:C.subtle;};
 const wLabel=(id)=>{const w=WAITERS.find(x=>x.id===id);return w?w.name:"";};
 function printerReceives(pr,item,receiptId){
@@ -109,12 +116,16 @@ function App(){
   if(!waiter) return <Login waiters={state.waiters} shopName={(state.shop&&state.shop.name)||"Kafeneío POS"} onLogin={(w)=>{localStorage.setItem("waiter",JSON.stringify(w));setWaiter(w);}}/>;
   PRINTERS=state.printers; WAITERS=state.waiters; DAY_START=(state.shop&&state.shop.dayStart!=null)?state.shop.dayStart:5;
   const isAdmin=waiter.role==="admin";
+  const allow=(ROLES[waiter.role]||ROLES.waiter).tabs;
   const open=state.open, tables=state.tables, floors=state.floors, waiters=state.waiters;
   const prepPrinters=state.printers.filter((p)=>p.id!==state.receiptPrinterId);
-  const tabs=[{id:"floor",label:"Floor",icon:"grid"},{id:"orders",label:"Orders",icon:"list"},
-    ...prepPrinters.map((p)=>({id:"prep:"+p.id,label:p.name,icon:/bar/i.test(p.name)?"glass":/kitchen/i.test(p.name)?"chef":"printer"})),
-    ...(isAdmin?[{id:"reports",label:"Reports",icon:"chart"},{id:"setup",label:"Setup",icon:"sliders"}]:[])];
-  if(!tabs.find((t)=>t.id===view)) setView("floor");
+  const tabs=[
+    ...(allow.includes("floor")?[{id:"floor",label:"Floor",icon:"grid"}]:[]),
+    ...(allow.includes("orders")?[{id:"orders",label:"Orders",icon:"list"}]:[]),
+    ...(allow.includes("prep")?prepPrinters.map((p)=>({id:"prep:"+p.id,label:p.name,icon:/bar/i.test(p.name)?"glass":/kitchen/i.test(p.name)?"chef":"printer"})):[]),
+    ...(allow.includes("reports")?[{id:"reports",label:"Reports",icon:"chart"}]:[]),
+    ...(allow.includes("setup")?[{id:"setup",label:"Setup",icon:"sliders"}]:[])];
+  if(tabs.length&&!tabs.find((t)=>t.id===view)) setView(tabs[0].id);
 
   const floorTables=tables.filter((t)=>t.floorId===floorId);
   const active=activeId?tables.find((t)=>t.id===activeId):null;const activeOrder=activeId?open[activeId]:null;
@@ -122,15 +133,16 @@ function App(){
   const wname=(id)=>{const w=waiters.find((w)=>w.id===id);return w?w.name:"—";};
   const prepView=view.startsWith("prep:")?state.printers.find((p)=>p.id===view.slice(5)):null;
 
+  const billStatus=(r)=>{const pr=r&&r.print;if(!pr)return{t:"",c:C.mute};if(pr.ok)return{t:"✓ Sent to receipt printer",c:C.green};if(pr.reason==="off")return{t:"Auto-print is off — showing preview (tap Print to print)",c:C.mute};return{t:pr.reason==="no-ip"?"No receipt printer set — showing preview":"Receipt printer offline — showing preview",c:C.amber};};
   const onPlace=async(t)=>{
     const res=await act("placeOrder",{tableId:t.id});
-    setActiveId(null); setView("floor");     // straight back to the tables for the next order
+    setActiveId(null); setView("floor");
     const pr=res&&res.print;
-    if(!pr||!pr.results||!pr.results.length) showToast("✓ "+t.name+" — order sent",C.green);
+    if(pr&&pr.muted) showToast("✓ "+t.name+" — order sent (auto-print off)",C.green);
+    else if(!pr||!pr.results||!pr.results.length) showToast("✓ "+t.name+" — order sent",C.green);
     else if(pr.results.every((x)=>x.ok)) showToast("✓ "+t.name+" sent to "+pr.results.map((x)=>x.name).join(", "),C.green);
     else showToast(t.name+" sent · offline: "+pr.results.filter((x)=>!x.ok).map((x)=>x.name).join(", "),C.amber);
   };
-  const billStatus=(r)=>{const pr=r&&r.print;if(!pr)return{t:"",c:C.mute};if(pr.ok)return{t:"✓ Sent to receipt printer",c:C.green};return{t:pr.reason==="no-ip"?"No receipt printer set — showing preview":"Receipt printer offline — showing preview",c:C.amber};};
   const onBill=async(t)=>{const o=open[t.id];const res=await act("printBill",{tableId:t.id});
     setReceipt({title:"KAFENEÍO",priced:true,tableName:t.name,servedBy:waiter.name,items:o.items,total:orderTotal(o),payments:o.payments||[],shop:state.shop,status:billStatus(res)});};
   const doPay=async(amount,method,lines)=>{const res=await act("pay",{tableId:payId,amount,method,lines});if(res.sale){setPayId(null);
@@ -168,7 +180,7 @@ function Login({waiters,onLogin,shopName}){
     {!sel?(<div style={{display:"grid",gap:8}}>{waiters.map((w)=>(<button key={w.id} className="btn" onClick={()=>{setErr("");setPin("");setSel(w);}}
         style={{display:"flex",alignItems:"center",gap:12,background:C.panel,border:`1px solid ${C.line}`,borderRadius:12,padding:"14px 16px",color:C.text,cursor:"pointer"}}>
         <span style={{width:12,height:12,borderRadius:12,background:w.color}}/><span style={{fontWeight:700,fontSize:15,flex:1,textAlign:"left"}}>{w.name}</span>
-        {w.role==="admin"&&<span style={{fontSize:10,fontWeight:800,color:C.violet,border:`1px solid ${C.violet}`,borderRadius:5,padding:"1px 6px"}}>ADMIN</span>}</button>))}
+        {w.role!=="waiter"&&<span style={{fontSize:10,fontWeight:800,color:w.role==="admin"?C.violet:C.blue,border:`1px solid ${w.role==="admin"?C.violet:C.blue}`,borderRadius:5,padding:"1px 6px"}}>{roleLabel(w.role).toUpperCase()}</span>}</button>))}
         <div style={{color:C.subtle,fontSize:11.5,marginTop:6}}><Ico n="lock" size={11}/> A PIN is required — customers can't get in without it.</div></div>
     ):(<div style={{display:"grid",gap:10}}>
       <div className="flex ac" style={{gap:12,justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:12,background:sel.color}}/><span style={{fontWeight:700}}>{sel.name}</span></div>
@@ -251,11 +263,11 @@ function TableEditor({t,onClose}){
 
 /* ---------- all orders ---------- */
 function Orders({open,tables,floors,now,onPick,onPay,waiter}){
-  const isAdmin=waiter.role==="admin";
-  const mine=(r)=>isAdmin||r.o.openedBy===waiter.id;
+  const seesAll=waiter.role!=="waiter";
+  const mine=(r)=>seesAll||r.o.openedBy===waiter.id;
   const list=Object.entries(open).map(([tid,o])=>{const t=tables.find((x)=>x.id===tid);const f=floors.find((x)=>x.id===(t&&t.floorId));return{tid,t,floor:f&&f.name,o};}).filter((r)=>r.o.items.length&&mine(r)).sort((a,b)=>new Date(a.o.openedAt)-new Date(b.o.openedAt));
-  return(<div><Title>{isAdmin?"All open orders":"My open orders"}</Title><P>{isAdmin?"Every table in service — all items together. Tap a card to edit it, or hit Pay to charge it straight away.":"The tables you opened. Tap to edit, or hit Pay to charge. Other waiters' tables show on the Floor."}</P>
-    {list.length===0?<Empty>{isAdmin?"No tables are open right now.":"You have no open tables. Open one from the Floor."}</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))"}}>
+  return(<div><Title>{seesAll?"All open orders":"My open orders"}</Title><P>{seesAll?"Every table in service — all items together. Tap a card to edit it, or hit Pay to charge it straight away.":"The tables you opened. Tap to edit, or hit Pay to charge. Other waiters' tables show on the Floor."}</P>
+    {list.length===0?<Empty>{seesAll?"No tables are open right now.":"You have no open tables. Open one from the Floor."}</Empty>:(<div style={{display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))"}}>
       {list.map((r)=>{const total=orderTotal(r.o);const paid=paidSum(r.o);const st=tableStatus(r.o);return(
         <div key={r.tid} className="btn" onClick={()=>onPick(r.t)} style={{display:"flex",flexDirection:"column",height:252,overflow:"hidden",textAlign:"left",background:C.panel,border:`1px solid ${C.line}`,borderTop:`3px solid ${STCOL[st]}`,borderRadius:14,padding:14,color:C.text,cursor:"pointer"}}>
           <div className="flex ac jb"><span style={{fontWeight:800,fontSize:17}}>{r.t.name}</span><span className="flex ac" style={{gap:4,fontSize:11,color:C.mute,fontFamily:MONO}}><Ico n="clock" size={11}/> {relTime(r.o.openedAt,now)}</span></div>
@@ -572,14 +584,14 @@ function Setup({state,mob}){
       <Title>Users ({waiters.length})</Title>
       <div style={CARD}>
         <div className="flex wrap" style={{gap:8}}><input placeholder="Name" value={wN} onChange={(e)=>setWN(e.target.value)} style={{...INP,flex:1,minWidth:90}}/><input placeholder="PIN" value={wPin} onChange={(e)=>setWPin(e.target.value)} style={{...INP,width:64}}/>
-          <select value={wRole} onChange={(e)=>setWRole(e.target.value)} style={{...INP,width:88}}><option value="waiter">Waiter</option><option value="admin">Admin</option></select>
+          <select value={wRole} onChange={(e)=>setWRole(e.target.value)} style={{...INP,width:120}}>{Object.keys(ROLES).map((r)=><option key={r} value={r}>{ROLES[r].label}</option>)}</select>
           <button className="btn" onClick={()=>{if(wN&&wPin){act("addWaiter",{name:wN,pin:wPin,role:wRole,color:PAL[waiters.length%PAL.length]});setWN("");setWPin("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/></button></div>
         <div style={{display:"grid",gap:6,marginTop:10}}>{waiters.map((w)=>(<div key={w.id} className="flex ac" style={{...ROW}}>
           <span style={{width:10,height:10,borderRadius:10,background:w.color}}/><span style={{flex:1,fontSize:13,fontWeight:600}}>{w.name}</span>
           <button className="btn" onClick={()=>{const p=prompt("New PIN for "+w.name);if(p!==null)act("updateWaiter",{id:w.id,patch:{pin:p}});}} style={{...CHIP,padding:"4px 8px",background:C.panel2,color:C.mute}}>PIN</button>
-          <button className="btn" onClick={()=>act("updateWaiter",{id:w.id,patch:{role:w.role==="admin"?"waiter":"admin"}})} style={{...CHIP,padding:"4px 8px",background:w.role==="admin"?C.violet:C.panel3,color:w.role==="admin"?C.ink:C.mute}}>{w.role==="admin"?"Admin":"Waiter"}</button>
+          <select value={w.role} onChange={(e)=>act("updateWaiter",{id:w.id,patch:{role:e.target.value}})} title="role" style={{...INP,width:118,padding:"5px 6px",fontSize:11.5}}>{Object.keys(ROLES).map((r)=><option key={r} value={r}>{ROLES[r].label}</option>)}</select>
           <button className="btn" onClick={()=>act("deleteWaiter",{id:w.id})} style={{...ICON,width:26,height:26,cursor:"pointer"}}><Ico n="trash" size={12} color={C.red}/></button></div>))}</div>
-        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}>Everyone needs a PIN to log in. Admins see setup + reports; waiters only take orders.</div>
+        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}>Everyone needs a PIN. <b>Admin</b>: everything · <b>Floor manager</b>: floor, orders & prep (no reports/setup) · <b>Waiter</b>: same but sees only their own orders · <b>Kitchen/Bar</b>: only the Orders and prep screens.</div>
       </div>
       <Title>Floors ({floors.length})</Title>
       <div style={CARD}><div className="flex" style={{gap:8}}><input placeholder="Floor name" value={fN} onChange={(e)=>setFN(e.target.value)} style={{...INP,flex:1}}/><button className="btn" onClick={()=>{if(fN){act("addFloor",{name:fN});setFN("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/></button></div>
@@ -611,6 +623,15 @@ function Setup({state,mob}){
       <div style={{marginTop:8,borderTop:`1px solid ${C.line}`,paddingTop:16}}><button className="btn" onClick={()=>{if(confirm("Reset everything to demo defaults?"))act("reset",{});}} style={{...BIG,background:"transparent",border:`1px solid ${C.red}`,color:C.red,cursor:"pointer"}}>Reset all data to demo defaults</button></div>
     </div>
     <div style={{gridColumn:mob?"auto":"1 / -1"}}>
+      <Title>General settings</Title>
+      <div style={CARD}>
+        <SettingRow label="Auto-print prep tickets when you Send an order" field="autoPrintPrep" on={state.settings.autoPrintPrep}/>
+        <SettingRow label="Auto-print the customer receipt when a table is paid" field="autoPrintReceipt" on={state.settings.autoPrintReceipt}/>
+        <SettingRow label="Lock a table to the waiter who opened it" field="lockToOpener" on={state.settings.lockToOpener}/>
+        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}>These apply to everyone. “Lock a table” stops a plain waiter from editing or paying a table another waiter opened — admins and floor managers are never locked.</div>
+      </div>
+    </div>
+    <div style={{gridColumn:mob?"auto":"1 / -1"}}>
       <Title>Shop details & business day</Title>
       <div style={{...CARD,display:"grid",gap:10,gridTemplateColumns:mob?"1fr":"1fr 1fr"}}>
         <ShopField label="Business name" field="name" val={state.shop.name}/>
@@ -635,6 +656,7 @@ const P=({children})=><p style={{color:C.mute,fontSize:12.5,margin:"6px 0 16px",
 const Empty=({children})=><div style={{background:C.panel,border:`1px dashed ${C.line}`,borderRadius:12,padding:30,textAlign:"center",color:C.subtle,fontSize:13}}>{children}</div>;
 function Dot({pid}){return<span title={pName(pid)} style={{width:8,height:8,borderRadius:8,background:pColor(pid),flexShrink:0,display:"inline-block"}}/>;}
 function ShopField({label,field,val}){return(<div><label style={{...LBL,display:"block",marginBottom:2}}>{label}</label><input defaultValue={val||""} onBlur={(e)=>act("setShop",{[field]:e.target.value})} style={{...INP,width:"100%"}}/></div>);}
+function SettingRow({label,field,on}){return(<button className="btn" onClick={()=>act("setSetting",{[field]:!on})} style={{display:"flex",alignItems:"center",gap:12,width:"100%",background:"transparent",border:"none",padding:"11px 0",cursor:"pointer",borderBottom:`1px solid ${C.line}`,color:C.text,textAlign:"left"}}><span style={{flex:1,fontSize:13.5}}>{label}</span><span style={{width:44,height:24,borderRadius:24,background:on?C.green:C.line,position:"relative",flexShrink:0,transition:"background .12s"}}><span style={{position:"absolute",top:2,left:on?22:2,width:20,height:20,borderRadius:20,background:"#fff",transition:"left .12s"}}/></span></button>);}
 const ICON={width:36,height:36,borderRadius:9,border:"none",background:C.panel2,display:"grid",placeItems:"center",color:C.text};
 const QTY={width:30,height:30,borderRadius:7,border:`1px solid ${C.line}`,background:C.panel2,display:"grid",placeItems:"center",color:C.text,flexShrink:0};
 const BIG={display:"flex",alignItems:"center",justifyContent:"center",gap:8,borderRadius:10,padding:"12px 14px",fontSize:13.5,fontFamily:SANS};
