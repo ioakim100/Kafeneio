@@ -2,7 +2,7 @@
 title PDA
 cd /d "%~dp0"
 
-if not exist "%~dp0server.js" (
+if not exist "%~dp0app\server.js" (
   echo.
   echo   It looks like you opened this from INSIDE the .zip file.
   echo   Windows can't run it that way.
@@ -41,5 +41,6 @@ echo   A browser window will open automatically.
 echo   KEEP THIS WINDOW OPEN while the shop is running.
 echo   Close it (or press Ctrl+C) to stop.
 echo.
+cd /d "%~dp0app"
 node server.js
 pause

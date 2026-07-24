@@ -1,0 +1,14 @@
+# app/ is meant to be the git repo root — all runtime data lives OUTSIDE
+# this folder (in ../data/), so there's normally nothing else to ignore here.
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+.idea/
+*.swp

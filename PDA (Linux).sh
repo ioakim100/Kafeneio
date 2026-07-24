@@ -1,7 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
-if [ ! -f "./server.js" ]; then
+if [ ! -f "./app/server.js" ]; then
   echo ""
   echo "  It looks like you're running this from inside the .zip."
   echo "  Extract the whole folder first, then run PDA from there."
@@ -24,4 +24,5 @@ echo "  Starting PDA..."
 echo "  A browser window will open automatically (if a desktop is present)."
 echo "  Keep this window open while the shop is running (Ctrl+C to stop)."
 echo ""
+cd app
 node server.js

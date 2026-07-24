@@ -18,6 +18,21 @@ Handy behaviours: pressing **Send order** fires silently and drops you back on t
 
 **Item choices (modifiers):** give any product questions like *Sugar: Sketos/Metrios/Glykos* or *Milk: yes/no* under **Setup → Menu → the sliders icon**. When a waiter taps that product it asks the questions, and the answers show on the order, the kitchen/bar ticket and the receipt. (The demo coffees already have sugar/milk choices.)
 
+## Project layout
+```
+kafeneio-pos/
+├── PDA.bat / PDA (Mac).command / PDA (Linux).sh   ← double-click to start
+├── icon.ico, README.md
+├── app/            ← all the CODE (this is what you'd put in git)
+│   ├── server.js
+│   └── public/     ← the web app (index.html, icons)
+└── data/           ← all the DATA — created automatically, never touch by hand
+    ├── data.db      (SQLite database — the live state)
+    └── backups/     (compressed snapshots, self-cleaning)
+```
+Code and data are kept **completely separate** on purpose: `app/` is safe to put under version control (git) with
+nothing sensitive in it, while `data/` holds the shop's real data and is the only thing you'd back up or `.gitignore`.
+
 ## Run it
 > **First unzip the folder!** Don't run anything from inside the `.zip`. On Windows: right-click `kafeneio-pos.zip`
 > → **Extract All…**. On Mac: double-click the zip. Then open the launcher from the **extracted folder**.
@@ -42,8 +57,9 @@ wherever you like (Desktop, `C:\KafeneioPOS`, a USB stick…) and it still runs.
 
 **Or from a terminal:**
 1. Install **Node.js 18+** — https://nodejs.org
-2. In this folder, run:
+2. Go into the **`app`** folder and run:
    ```
+   cd app
    node server.js
    ```
 3. It prints addresses, for example:
@@ -55,10 +71,11 @@ wherever you like (Desktop, `C:\KafeneioPOS`, a USB stick…) and it still runs.
 
 (To stop the browser from opening automatically, start with `NO_OPEN=1`.)
 
-Data is saved to `data.json` in this folder. Delete it (or use *Setup → Reset*) to start fresh.
+Data is saved in a SQLite database at `data/data.db` (created automatically, sitting **next to** — not inside — the
+`app` folder). Use *Setup → Reset* to start fresh, or just delete the whole `data/` folder while the app isn't running.
 
 ## Backups (so a dead computer never loses your data)
-Everything lives in one file (`data.json`) and the app keeps working **with no internet** — the backups just ride
+Data lives in `data/data.db` (SQLite) and the app keeps working **with no internet** — the backups just ride
 along. In **Setup → Backup & restore** (admin):
 - **Automatic backups** run while the app is open (default every 10 min) and on shutdown. Snapshots are
   **compressed (.gz)** and **self-cleaning** — all from the last 24h, then one per day for two weeks, then one per
@@ -68,7 +85,7 @@ along. In **Setup → Backup & restore** (admin):
   waits and syncs later. This is what protects you if the computer dies.
 - **Back up now** forces one immediately. **Restore…** lists every snapshot (cloud folder + local) — pick one to load.
 - **Dead computer?** Install the app on a new one, set the **same** cloud folder, open **Restore…**, pick the latest —
-  you're exactly where you left off. (If you copy the whole app folder including `backups/`, it even auto-restores on
+  you're exactly where you left off. (If you copy the whole `data/` folder to the new machine, it even auto-restores on
   first start.)
 
 ## Where to run it (PC, mini-PC, Raspberry Pi… or an Android tablet)
@@ -81,7 +98,7 @@ devices are just browsers** pointing at it. They must be on the **same Wi-Fi/net
   mini-PC or a **Raspberry Pi** left running is ideal (low power, silent). Whatever runs the server should stay on
   while you're open, and ideally have a fixed local IP.
 - **Server on an Android tablet (advanced, no PC needed).** Install the **Termux** app, then inside it run
-  `pkg install nodejs`, copy this folder over, and `node server.js`. That same tablet can also be a client (open
+  `pkg install nodejs`, copy this folder over, then `cd app && node server.js`. That same tablet can also be a client (open
   `http://localhost:3000`). It works, but a tablet is fussier than a small always-on PC/Pi, so use this only if you
   don't want a separate machine.
 

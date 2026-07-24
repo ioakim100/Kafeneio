@@ -1,7 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
-if [ ! -f "./server.js" ]; then
+if [ ! -f "./app/server.js" ]; then
   echo ""
   echo "  It looks like you opened this from INSIDE the .zip file."
   echo "  Please unzip kafeneio-pos.zip first, then open PDA from the unzipped folder."
@@ -25,4 +25,5 @@ echo "  Starting PDA..."
 echo "  A browser window will open automatically."
 echo "  KEEP THIS WINDOW OPEN while the shop is running (Ctrl+C to stop)."
 echo ""
+cd app
 node server.js

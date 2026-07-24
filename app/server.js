@@ -23,8 +23,10 @@ const zlib = require("zlib");
 const PORT = process.env.PORT || 3000;
 const _emitWarning = process.emitWarning.bind(process);
 process.emitWarning = (w, ...a) => { const s = (w && w.message) || String(w); if (/SQLite is an experimental/i.test(s)) return; return _emitWarning(w, ...a); };
-const DATA_FILE = path.join(__dirname, "data.json");
-const BACKUP_DIR = path.join(__dirname, "backups");
+const DATA_DIR = path.join(__dirname, "..", "data");        // all runtime data lives OUTSIDE the code folder
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+const DATA_FILE = path.join(DATA_DIR, "data.json");           // legacy/migration only
+const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const PUBLIC = path.join(__dirname, "public");
 const uid = () => Math.random().toString(36).slice(2, 9);
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -86,7 +88,7 @@ const SEED = {
 };
 
 /* ---------------- storage: SQLite (built-in) with JSON fallback ---------------- */
-const DB_FILE = path.join(__dirname, "data.db");
+const DB_FILE = path.join(DATA_DIR, "data.db");
 let db = null, useSqlite = false;
 try {
   const { DatabaseSync } = require("node:sqlite");
@@ -129,6 +131,10 @@ function boot() {
   if (useSqlite) {
     try { const row = db.prepare("SELECT v FROM kv WHERE k='config'").get(); if (row) { raw = JSON.parse(row.v); source = "db"; } } catch {}
     if (raw) salesFromDb = loadSales();
+  }
+  if (!raw) {                                              // upgrading from an older flat layout? old data.db/.json sat next to server.js
+    try { const oldDb = path.join(__dirname, "data.db"); if (!useSqlite && fs.existsSync(path.join(__dirname, "data.json"))) { raw = JSON.parse(fs.readFileSync(path.join(__dirname, "data.json"), "utf8")); source = "legacy-json (old layout)"; }
+      else if (fs.existsSync(oldDb)) { const { DatabaseSync } = require("node:sqlite"); const odb = new DatabaseSync(oldDb, { readOnly: true }); const row = odb.prepare("SELECT v FROM kv WHERE k='config'").get(); if (row) { raw = JSON.parse(row.v); salesFromDb = odb.prepare("SELECT data FROM sales ORDER BY closedAt DESC").all().map((r) => JSON.parse(r.data)); source = "old layout db"; } odb.close(); } } catch {}
   }
   if (!raw) { try { if (fs.existsSync(DATA_FILE)) { raw = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); source = "legacy-json"; } } catch {} }
   if (!raw) { try { const p = path.join(BACKUP_DIR, "latest.json"); if (fs.existsSync(p)) { raw = JSON.parse(fs.readFileSync(p, "utf8")); source = "backup"; } } catch {} }
