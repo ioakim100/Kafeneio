@@ -60,8 +60,9 @@ Data is saved to `data.json` in this folder. Delete it (or use *Setup → Reset*
 ## Backups (so a dead computer never loses your data)
 Everything lives in one file (`data.json`) and the app keeps working **with no internet** — the backups just ride
 along. In **Setup → Backup & restore** (admin):
-- **Automatic backups** run while the app is open (default every 10 min) and on shutdown. Local copies are kept in the
-  app's `backups/` folder, and the **last backup time** is shown with a green/red dot.
+- **Automatic backups** run while the app is open (default every 10 min) and on shutdown. Snapshots are
+  **compressed (.gz)** and **self-cleaning** — all from the last 24h, then one per day for two weeks, then one per
+  month, deleting anything past the “keep history” window (default 12 months). The folder never grows out of control.
 - **Cloud / off-machine folder:** paste the path of a **Dropbox / Google Drive / OneDrive** folder (or a USB / network
   drive). The app writes a snapshot there too; your cloud app uploads it when there's internet, and if there isn't, it
   waits and syncs later. This is what protects you if the computer dies.

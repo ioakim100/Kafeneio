@@ -18,6 +18,7 @@ const net = require("net");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const zlib = require("zlib");
 
 const PORT = process.env.PORT || 3000;
 const _emitWarning = process.emitWarning.bind(process);
@@ -78,7 +79,7 @@ const SEED = {
     { id: "w2", name: "Nikos", color: "#7BC49A", role: "waiter", pin: "2222" },
   ],
   shop: { name: "Kafeneío", vat: "", taxOffice: "", address: "", phone: "", dayStart: 5 },
-  settings: { autoPrintPrep: true, autoPrintReceipt: true, lockToOpener: false, autoBackup: true, backupIntervalMin: 10, backupDir: "" },
+  settings: { autoPrintPrep: true, autoPrintReceipt: true, lockToOpener: false, autoBackup: true, backupIntervalMin: 10, backupDir: "", backupKeepMonths: 12 },
   meta: { lastBackupAt: null, lastBackupOk: true, lastBackupMsg: "" },
   open: {},
   sales: [],
@@ -162,6 +163,7 @@ function migrate() {
   if (state.settings.autoBackup === undefined) state.settings.autoBackup = true;
   if (state.settings.backupIntervalMin === undefined) state.settings.backupIntervalMin = 10;
   if (state.settings.backupDir === undefined) state.settings.backupDir = "";
+  if (state.settings.backupKeepMonths === undefined) state.settings.backupKeepMonths = 12;
   state.meta = state.meta || { lastBackupAt: null, lastBackupOk: true, lastBackupMsg: "" };
   state.printers.forEach((p) => {
     if (p.mode === undefined) p.mode = p.all ? "all" : (/bar/i.test(p.name) ? "rest" : "own");
@@ -195,22 +197,39 @@ function migrate() {
 function save() { dirty = true; persistConfig(); }
 /* ---------------- backups (offline-first) ---------------- */
 function ensureDir(d) { try { fs.mkdirSync(d, { recursive: true }); } catch {} }
-function pruneLocal(keep = 60) {
-  try { const f = fs.readdirSync(BACKUP_DIR).filter((x) => /^kafeneio-.*\.json$/.test(x)).sort();
-    for (let i = 0; i < f.length - keep; i++) try { fs.unlinkSync(path.join(BACKUP_DIR, f[i])); } catch {} } catch {}
+function readBackupFile(p) { const buf = fs.readFileSync(p); return JSON.parse((p.endsWith(".gz") ? zlib.gunzipSync(buf) : buf).toString("utf8")); }
+/* keep: everything <24h, one/day for 14 days, one/month beyond, delete older than keepMonths */
+function pruneRetention(dir) {
+  let files;
+  try { files = fs.readdirSync(dir).filter((f) => /^kafeneio-.*\.(json|json\.gz)$/.test(f) && !/latest/.test(f)); } catch { return; }
+  const now = Date.now();
+  const info = files.map((f) => { let m = 0; try { m = fs.statSync(path.join(dir, f)).mtime.getTime(); } catch {} return { f, m }; }).sort((a, b) => b.m - a.m);
+  const keepMonths = (state.settings && state.settings.backupKeepMonths) || 12;
+  const keep = new Set(), seenDay = new Set(), seenMonth = new Set();
+  for (const { f, m } of info) {
+    const ageDays = (now - m) / 86400000, d = new Date(m);
+    if (ageDays > keepMonths * 31) continue;                          // too old → delete
+    if (now - m <= 24 * 3600000) { keep.add(f); continue; }           // all within 24h
+    if (ageDays <= 14) { const k = d.toISOString().slice(0, 10); if (!seenDay.has(k)) { seenDay.add(k); keep.add(f); } continue; } // 1/day, 14d
+    const k = d.toISOString().slice(0, 7); if (!seenMonth.has(k)) { seenMonth.add(k); keep.add(f); }                              // 1/month beyond
+  }
+  if (info[0]) keep.add(info[0].f);                                   // always keep newest
+  for (const { f } of info) if (!keep.has(f)) try { fs.unlinkSync(path.join(dir, f)); } catch {}
 }
 function writeSnapshot(reason) {
   const json = JSON.stringify(state);
+  const gz = zlib.gzipSync(Buffer.from(json));
   const now = new Date();
   const ts = now.toISOString().replace(/:/g, "-").replace("T", "_").slice(0, 19);
   let ok = true, msg = "";
-  try { ensureDir(BACKUP_DIR); fs.writeFileSync(path.join(BACKUP_DIR, `kafeneio-${ts}.json`), json); fs.writeFileSync(path.join(BACKUP_DIR, "latest.json"), json); pruneLocal(); }
+  try { ensureDir(BACKUP_DIR); fs.writeFileSync(path.join(BACKUP_DIR, `kafeneio-${ts}.json.gz`), gz); fs.writeFileSync(path.join(BACKUP_DIR, "latest.json"), json); pruneRetention(BACKUP_DIR); }
   catch (e) { ok = false; msg = "local: " + e.message; }
   const dir = state.settings && state.settings.backupDir;
   if (dir) {
-    try { ensureDir(dir); const day = now.toISOString().slice(0, 10);
+    try { ensureDir(dir);
       fs.writeFileSync(path.join(dir, "kafeneio-latest.json"), json);
-      fs.writeFileSync(path.join(dir, `kafeneio-${day}.json`), json); }
+      fs.writeFileSync(path.join(dir, `kafeneio-${ts}.json.gz`), gz);
+      pruneRetention(dir); }
     catch (e) { ok = false; msg = (msg ? msg + "; " : "") + "folder: " + e.message; }
   }
   state.meta = { lastBackupAt: now.toISOString(), lastBackupOk: ok, lastBackupMsg: msg, reason: reason || "" };
@@ -220,16 +239,13 @@ function writeSnapshot(reason) {
 }
 function listBackups() {
   const out = [];
-  const scan = (dir, source) => { try { for (const f of fs.readdirSync(dir)) { if (!/\.json$/.test(f)) continue; const st = fs.statSync(path.join(dir, f)); out.push({ name: f, source, dir, size: st.size, at: st.mtime.toISOString() }); } } catch {} };
+  const scan = (dir, source) => { try { for (const f of fs.readdirSync(dir)) { if (!/\.(json|json\.gz)$/.test(f)) continue; const st = fs.statSync(path.join(dir, f)); out.push({ name: f, source, dir, size: st.size, at: st.mtime.toISOString() }); } } catch {} };
   scan(BACKUP_DIR, "local");
   if (state.settings && state.settings.backupDir) scan(state.settings.backupDir, "folder");
   out.sort((a, b) => b.at.localeCompare(a.at));
-  return out.slice(0, 120);
+  return out.slice(0, 200);
 }
-function restoreFromFile(dir, name) {
-  const data = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
-  applyFullState(data);
-}
+function restoreFromFile(dir, name) { applyFullState(readBackupFile(path.join(dir, name))); }
 const orderTotal = (o) => round2((o.items || []).reduce((s, x) => s + itemGross(x), 0));
 const waiterName = (id) => (state.waiters.find((w) => w.id === id) || {}).name || "—";
 const printerById = (id) => state.printers.find((p) => p.id === id);
