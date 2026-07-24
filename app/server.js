@@ -429,7 +429,24 @@ async function handleAction(type, payload = {}, waiterId) {
     }
     case "moveTable": { const t = state.tables.find((x) => x.id === p.tableId); if (t) { t.x = p.x; t.y = p.y; } break; }
     case "updateTable": { const t = state.tables.find((x) => x.id === p.id); if (t) Object.assign(t, p.patch || {}); break; }
-    case "addTable": state.tables.push({ id: uid(), name: p.name, seats: p.seats || 4, floorId: p.floorId, x: p.x ?? 50, y: p.y ?? 50, shape: p.shape || "square", size: p.size || "m" }); break;
+    case "addTable": {
+      const others = state.tables.filter((t) => t.floorId === p.floorId);
+      let x = p.x, y = p.y;
+      if (x == null || y == null) {
+        const cand = [];
+        for (let gy = 16; gy <= 84; gy += 15) for (let gx = 12; gx <= 88; gx += 12) cand.push({ x: gx, y: gy });
+        let best = cand[0], bestD = -1;
+        for (const c of cand) {
+          if (!others.length) { best = c; break; }
+          let d = 1e9; for (const t of others) { const dx = t.x - c.x, dy = t.y - c.y; d = Math.min(d, dx * dx + dy * dy); }
+          if (d > 12 * 12) { best = c; break; }   // first slot comfortably clear of every existing table
+          if (d > bestD) { bestD = d; best = c; }  // else remember the most-spacious slot
+        }
+        x = best.x; y = best.y;
+      }
+      state.tables.push({ id: uid(), name: p.name, seats: p.seats || 4, floorId: p.floorId, x, y, shape: p.shape || "square", size: p.size || "m" });
+      break;
+    }
     case "deleteTable": state.tables = state.tables.filter((t) => t.id !== p.id); break;
     case "addFloor": state.floors.push({ id: uid(), name: p.name }); break;
     case "deleteFloor": if (state.floors.length > 1) { state.floors = state.floors.filter((f) => f.id !== p.id); state.tables = state.tables.filter((t) => t.floorId !== p.id); } break;
