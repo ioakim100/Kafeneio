@@ -168,9 +168,9 @@ function App(){
       <TopBar tabs={tabs} view={view} setView={setView} waiter={waiter} openCount={Object.keys(open).length} shopName={(state.shop&&state.shop.name)||"Kafeneío POS"} onLogout={()=>{localStorage.removeItem("waiter");setWaiter(null);}}/>
       <div style={{padding:mob?10:16}}>
         {view==="floor"&&<Floor floors={floors} floorId={floorId} setFloorId={setFloorId} tables={floorTables} open={open} arrange={arrange} setArrange={setArrange} now={now} isAdmin={isAdmin} onPick={(t)=>setActiveId(t.id)}/>}
-        {view==="orders"&&<Orders open={open} tables={tables} floors={floors} now={now} waiter={waiter} onPick={(t)=>setActiveId(t.id)} onPay={(t)=>setPayId(t.id)}/>}
+        {view==="orders"&&<Orders open={open} tables={tables} floors={floors} now={now} waiter={waiter} onPick={(t)=>setActiveId(t.id)} onPay={(t)=>setPayId(t.id)} onPrint={async(t)=>{const r=await act("printOrder",{tableId:t.id});const pr=r&&r.print;if(pr&&pr.ok)showToast("🖨 "+t.name+" — ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ printed",C.green);else if(pr&&pr.reason==="no-receipt-printer")showToast("Set a Bill printer in Setup first",C.amber);else showToast("ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ sent (no printer — see preview)",C.mute);}}/>}
         {prepView&&<Prep printer={prepView} receiptId={state.receiptPrinterId} open={open} tables={tables} floors={floors} now={now}/>}
-        {view==="reports"&&isAdmin&&<Reports sales={state.sales} waiters={waiters}/>}
+        {view==="reports"&&isAdmin&&<Reports sales={state.sales} waiters={waiters} counter={state.counter} toast={showToast}/>}
         {view==="setup"&&isAdmin&&<Setup state={state} mob={mob}/>}
       </div>
       {active&&<OrderScreen table={active} order={activeOrder} menu={state.menu} wname={wname} mob={mob}
@@ -279,7 +279,7 @@ function TableEditor({t,onClose}){
 }
 
 /* ---------- all orders ---------- */
-function Orders({open,tables,floors,now,onPick,onPay,waiter}){
+function Orders({open,tables,floors,now,onPick,onPay,onPrint,waiter}){
   const seesAll=waiter.role!=="waiter";
   const mine=(r)=>seesAll||r.o.openedBy===waiter.id;
   const list=Object.entries(open).map(([tid,o])=>{const t=tables.find((x)=>x.id===tid);const f=floors.find((x)=>x.id===(t&&t.floorId));return{tid,t,floor:f&&f.name,o};}).filter((r)=>r.o.items.length&&mine(r)).sort((a,b)=>new Date(a.o.openedAt)-new Date(b.o.openedAt));
@@ -306,10 +306,13 @@ function Orders({open,tables,floors,now,onPick,onPay,waiter}){
           <div style={{margin:"10px 0 0",borderTop:`1px solid ${C.line}`,paddingTop:8}}>
           {rounds.map((g,gi)=>(<div key={gi} style={{marginBottom:8}}><div className="flex ac jb" style={{fontSize:10,fontWeight:800,letterSpacing:.5,textTransform:"uppercase",color:g.isNew?C.amber:g.servedGroup?C.green:C.blue,marginBottom:2}}><span className="flex ac" style={{gap:4}}>{g.servedGroup&&<Ico n="check" size={12} color={C.green}/>}{g.label}</span>{g.time&&<span style={{fontFamily:MONO,fontWeight:600,color:C.subtle}}>{new Date(g.time).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</span>}</div>{g.items.map(itemRow)}</div>))}
           </div>
-          <div className="flex ac" style={{margin:"10px 0 0",borderTop:`1px dashed ${C.line}`,paddingTop:10,gap:8}}>
-            <div style={{flex:1,minWidth:0}}><div style={{fontSize:10.5,color:C.mute}}>{paid>0?"Left to pay":"Total"}</div><div style={{fontFamily:MONO,fontSize:18,fontWeight:800,color:C.amber}}>{euro(total-paid)}</div></div>
-            {undelivered.length>0&&<button className="btn" onClick={(e)=>{e.stopPropagation();act("bumpList",{tableId:r.tid,lids:undelivered.map((x)=>x.lid)});}} title="Mark everything as served" style={{display:"flex",alignItems:"center",gap:5,padding:"9px 11px",borderRadius:10,background:C.panel3,border:`1px solid ${C.line}`,color:C.text,fontWeight:700,fontSize:12.5,cursor:"pointer"}}><Ico n="check" size={15} color={C.green}/> Served</button>}
-            <button className="btn" onClick={(e)=>{e.stopPropagation();onPay(r.t);}} style={{display:"flex",alignItems:"center",gap:6,padding:"9px 14px",borderRadius:10,background:C.green,border:"none",color:C.ink,fontWeight:800,fontSize:13.5,cursor:"pointer"}}><Ico n="cash" size={16}/> Pay</button>
+          <div style={{margin:"10px 0 0",borderTop:`1px dashed ${C.line}`,paddingTop:10}}>
+            <div className="flex ac jb"><span style={{fontSize:10.5,color:C.mute}}>{paid>0?"Left to pay":"Total"}</span><span style={{fontFamily:MONO,fontSize:18,fontWeight:800,color:C.amber}}>{euro(total-paid)}</span></div>
+            <div className="flex ac" style={{gap:8,marginTop:10}}>
+              <button className="btn" onClick={(e)=>{e.stopPropagation();onPrint(r.t);}} title="Print the ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ (whole order) now" style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:5,padding:"9px 8px",borderRadius:10,background:C.panel3,border:`1px solid ${C.line}`,color:C.text,fontWeight:700,fontSize:12.5,cursor:"pointer"}}><Ico n="printer" size={15} color={C.blue}/> Print</button>
+              {undelivered.length>0&&<button className="btn" onClick={(e)=>{e.stopPropagation();act("bumpList",{tableId:r.tid,lids:undelivered.map((x)=>x.lid)});}} title="Mark everything as served" style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:5,padding:"9px 8px",borderRadius:10,background:C.panel3,border:`1px solid ${C.line}`,color:C.text,fontWeight:700,fontSize:12.5,cursor:"pointer"}}><Ico n="check" size={15} color={C.green}/> Served</button>}
+              <button className="btn" onClick={(e)=>{e.stopPropagation();onPay(r.t);}} style={{flex:1.2,display:"flex",alignItems:"center",justifyContent:"center",gap:6,padding:"9px 8px",borderRadius:10,background:C.green,border:"none",color:C.ink,fontWeight:800,fontSize:13.5,cursor:"pointer"}}><Ico n="cash" size={16}/> Pay</button>
+            </div>
           </div>
         </div>);})}
     </div>)}
@@ -367,18 +370,25 @@ function OrderScreen({table,order,menu,wname,mob,onAdd,onQty,onRemove,onNote,onW
       <div style={{fontSize:13,fontWeight:600,lineHeight:1.25}}>{m.name}</div><div className="flex ac jb" style={{marginTop:8}}><span style={{fontFamily:MONO,color:C.amber,fontSize:13}}>{m.unit==="open"?"€ open":euro(m.price)+(m.unit==="kg"?"/kg":"")}</span><span className="flex ac" style={{gap:4}}>{m.unit==="kg"&&<span style={{fontSize:8.5,fontWeight:800,color:C.blue}}>KG</span>}{m.unit==="open"&&<span style={{fontSize:8.5,fontWeight:800,color:C.red}}>±€</span>}{m.options&&m.options.length>0&&<span style={{fontSize:8.5,fontWeight:800,color:C.violet}}>OPT</span>}<Dot pid={m.printerId}/></span></div>
       {n>0&&<span className="pop" style={{position:"absolute",top:-8,right:-8,minWidth:20,height:20,padding:"0 5px",borderRadius:10,background:C.amber,color:C.ink,fontSize:11,fontWeight:800,fontFamily:MONO,display:"grid",placeItems:"center"}}>{n}</span>}</button>);})}</div>
   </div>);
+  const rows=items.map((x,i)=>({x,i}));
+  rows.sort((a,b)=>(a.x.sent?1:0)-(b.x.sent?1:0));                 // new (unsent) items always on top
   const OrderPane=(<div style={{flex:1,minWidth:0,overflowY:"auto",padding:12}}>
     {items.length===0?<div style={{color:C.subtle,fontSize:13,padding:"30px 8px"}}>No items yet. Tap products — drinks and food — then send the order.</div>:
-      items.map((x,i)=>{const pq=paidMap[x.lid]||0;return(<div key={i} style={{borderBottom:`1px solid ${C.line}`,padding:"9px 0",opacity:(x.done||pq>=x.qty)?.55:1}}>
+      rows.map(({x,i})=>{const pq=paidMap[x.lid]||0;const locked=x.sent;return(<div key={x.lid} style={{borderBottom:`1px solid ${C.line}`,padding:"9px 0",opacity:locked?.55:1}}>
         <div className="flex ac" style={{gap:8}}><Dot pid={x.printerId}/>
           <div style={{flex:1,minWidth:0}}><div className="flex ac" style={{gap:6}}><span style={{fontSize:13.5,fontWeight:600}}>{x.name}</span>
             {x.sent?<span style={{fontSize:9,fontWeight:800,color:x.done?C.green:C.blue,border:`1px solid ${x.done?C.greenDim:C.blueDim}`,borderRadius:4,padding:"0 4px"}}>{x.done?"DONE":"SENT"}</span>:<span style={{fontSize:9,fontWeight:800,color:C.amber,border:`1px solid ${C.amberDim}`,borderRadius:4,padding:"0 4px"}}>NEW</span>}{pq>0&&<span style={{fontSize:9,fontWeight:800,color:C.ink,background:C.green,borderRadius:4,padding:"1px 5px"}}>{pq>=x.qty?"PAID":`PAID ${pq}/${x.qty}`}</span>}</div>
             <div style={{fontSize:11,color:C.mute,fontFamily:MONO}}>{x.unit==="kg"?`${euro(x.price)}/kg = ${euro(lineGross(x))}`:x.unit==="open"?(x.price<0?"Discount":"Extra charge"):euro(x.price)} · {wname(x.waiterId)}</div></div>
-          {(x.unit==="kg"||x.unit==="open")?(wIdx===i?<span className="flex ac" style={{gap:4}}><input autoFocus type="number" step={x.unit==="open"?"0.5":"0.05"} inputMode="decimal" value={wVal} onChange={(e)=>setWVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveW();}} style={{...INP,width:64,fontSize:12,padding:"6px 8px"}}/><span style={{fontSize:11,color:C.mute}}>{x.unit==="kg"?"kg":"€"}</span><button className="btn" onClick={saveW} style={{...QTY,width:30,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></span>:<button className="btn" onClick={()=>openW(i)} title="tap to edit" style={{...CHIP,background:C.panel2,color:x.unit==="open"&&x.price<0?C.red:C.text,border:`1px solid ${C.line}`,fontFamily:MONO,padding:"7px 10px"}}>{x.unit==="kg"?(x.weight||0)+" kg":euro(x.price)}</button>):<React.Fragment><button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button><span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span><button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></React.Fragment>}
-          <button className="btn" onClick={()=>openNote(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="note" size={13} color={x.note?C.blue:C.mute}/></button>
-          <button className="btn" onClick={()=>onRemove(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button></div>
+          {locked?<React.Fragment>
+            <span style={{fontFamily:MONO,fontWeight:800,fontSize:14,color:C.mute,minWidth:44,textAlign:"right"}}>{qtyLabel(x)||euro(x.price)}</span>
+            {pq>0?<span style={{width:30}}/>:<button className="btn" onClick={()=>onRemove(i)} title="void this sent item" style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="x" size={15} color={C.red}/></button>}
+          </React.Fragment>:<React.Fragment>
+            {(x.unit==="kg"||x.unit==="open")?(wIdx===i?<span className="flex ac" style={{gap:4}}><input autoFocus type="number" step={x.unit==="open"?"0.5":"0.05"} inputMode="decimal" value={wVal} onChange={(e)=>setWVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveW();}} style={{...INP,width:64,fontSize:12,padding:"6px 8px"}}/><span style={{fontSize:11,color:C.mute}}>{x.unit==="kg"?"kg":"€"}</span><button className="btn" onClick={saveW} style={{...QTY,width:30,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></span>:<button className="btn" onClick={()=>openW(i)} title="tap to edit" style={{...CHIP,background:C.panel2,color:x.unit==="open"&&x.price<0?C.red:C.text,border:`1px solid ${C.line}`,fontFamily:MONO,padding:"7px 10px"}}>{x.unit==="kg"?(x.weight||0)+" kg":euro(x.price)}</button>):<React.Fragment><button className="btn" onClick={()=>onQty(i,-1)} style={{...QTY,cursor:"pointer"}}><Ico n="minus" size={14}/></button><span style={{fontFamily:MONO,width:20,textAlign:"center",fontWeight:700}}>{x.qty}</span><button className="btn" onClick={()=>onQty(i,1)} style={{...QTY,cursor:"pointer"}}><Ico n="plus" size={14}/></button></React.Fragment>}
+            <button className="btn" onClick={()=>openNote(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="note" size={13} color={x.note?C.blue:C.mute}/></button>
+            <button className="btn" onClick={()=>onRemove(i)} style={{...ICON,width:30,height:30,cursor:"pointer"}}><Ico n="trash" size={13} color={C.red}/></button>
+          </React.Fragment>}</div>
         {x.opts&&x.opts.length>0&&<div style={{fontSize:13,fontWeight:700,color:C.violet,marginLeft:16,marginTop:3}}>↳ {optsText(x)}</div>}
-        {noteIdx===i?(<div className="flex ac" style={{gap:6,marginTop:6,marginLeft:16}}><input autoFocus value={noteVal} onChange={(e)=>setNoteVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveNote();}} placeholder="e.g. no onions…" style={{...INP,flex:1,fontSize:12}}/><button className="btn" onClick={saveNote} style={{...QTY,width:32,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></div>):x.note?<div style={{fontSize:13,fontWeight:700,color:C.blue,marginLeft:16,marginTop:3}}>✎ {x.note}</div>:null}
+        {(!locked&&noteIdx===i)?(<div className="flex ac" style={{gap:6,marginTop:6,marginLeft:16}}><input autoFocus value={noteVal} onChange={(e)=>setNoteVal(e.target.value)} onKeyDown={(e)=>{if(e.key==="Enter")saveNote();}} placeholder="e.g. no onions…" style={{...INP,flex:1,fontSize:12}}/><button className="btn" onClick={saveNote} style={{...QTY,width:32,cursor:"pointer"}}><Ico n="check" size={14} color={C.green}/></button></div>):x.note?<div style={{fontSize:13,fontWeight:700,color:C.blue,marginLeft:16,marginTop:3}}>✎ {x.note}</div>:null}
       </div>);})}
   </div>);
   return(<Overlay><div style={{display:"flex",flexDirection:"column",height:"100%",background:C.ink}}>
@@ -585,9 +595,11 @@ function Receipt({data,onClose}){
 }
 
 /* ---------- reports ---------- */
-function Reports({sales,waiters}){
+function Reports({sales,waiters,counter,toast}){
   const today=bizDay(Date.now());
-  const [from,setFrom]=useState(today);const [to,setTo]=useState(today);const [openIds,setOpenIds]=useState({});const [gexp,setGexp]=useState({});const [pexp,setPexp]=useState({});
+  const [from,setFrom]=useState(today);const [to,setTo]=useState(today);const [openIds,setOpenIds]=useState({});const [gexp,setGexp]=useState({});const [pexp,setPexp]=useState({});const [zData,setZData]=useState(null);
+  const computeZ=(arr)=>{let gross=0,cash=0,card=0,first=null,last=null;const rates={};const byW={};for(const s of arr){gross+=s.total||0;const t=new Date(s.closedAt).getTime();if(first==null||t<first)first=t;if(last==null||t>last)last=t;for(const it of (s.items||[])){const g=lineGross(it);const r=it.vat!=null?it.vat:0;const net=g/(1+r/100);(rates[r]=rates[r]||{rate:r,net:0,vat:0});rates[r].net+=net;rates[r].vat+=g-net;}for(const pp of (s.payments||[])){if(pp.method==="card")card+=pp.amount;else cash+=pp.amount;}const w=s.waiterId||"?";(byW[w]=byW[w]||{n:0,g:0});byW[w].n+=1;byW[w].g+=s.total||0;}return{count:arr.length,gross,cash,card,first,last,net:Object.values(rates).reduce((a,v)=>a+v.net,0),vat:Object.values(rates).reduce((a,v)=>a+v.vat,0),rates:Object.values(rates).sort((a,b)=>a.rate-b.rate),byW};};
+  const openZ=(salesArr,label,fromK,toK,closing)=>setZData({sales:salesArr,label,from:fromK,to:toK,closing:!!closing});
   const revealSale=(s)=>{
     const day=bizDay(s.closedAt),wk=weekStartKey(day),mo=day.slice(0,7);
     const spanDays=Math.round((Date.parse(to)-Date.parse(from))/86400000)+1;
@@ -618,6 +630,10 @@ function Reports({sales,waiters}){
   return(<div>
     <div className="flex ac jb wrap" style={{gap:10,marginBottom:8}}><Title>Sales report</Title>
       <div className="flex" style={{gap:8}}><button className="btn" onClick={()=>{if(confirm("Add ~1 year of random demo sales for testing? Use Reset later to clear them."))act("seedDemoSales",{});}} style={{display:"flex",alignItems:"center",gap:7,...SMALL,background:C.panel2,border:`1px solid ${C.line}`,color:C.mute,cursor:"pointer"}}><Ico n="plus" size={15}/> Demo data</button><button className="btn" onClick={()=>window.print()} style={{display:"flex",alignItems:"center",gap:7,...SMALL,background:C.panel3,color:C.text,cursor:"pointer"}}><Ico n="printer" size={15}/> Print</button></div></div>
+      <div className="flex ac jb wrap" style={{gap:10,marginBottom:14,background:C.panel,border:`1px solid ${C.line}`,borderRadius:12,padding:"10px 14px"}}>
+        <div><span style={{fontSize:11,color:C.mute,textTransform:"uppercase",letterSpacing:.5}}>Αποδείξεις από το τελευταίο κλείσιμο</span><div style={{fontFamily:MONO,fontSize:22,fontWeight:800,color:C.amber}}>{(counter&&counter.n)||0}{counter&&counter.openedAt?<span style={{fontSize:11,color:C.subtle,fontWeight:400}}> · από {new Date(counter.openedAt).toLocaleString("el-GR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>:null}</div></div>
+        <button className="btn" onClick={()=>{const k=bizDay(Date.now());openZ(sales.filter((s)=>bizDay(s.closedAt)===k),"Σήμερα · "+fmtDayLabel(k),k,k,true);}} style={{display:"flex",alignItems:"center",gap:7,...SMALL,background:C.panel3,border:`1px solid ${C.line}`,color:C.text,cursor:"pointer"}}><Ico n="undo" size={15}/> Κλείσιμο ημέρας (Ζ)</button>
+      </div>
     <div className="flex ac wrap" style={{gap:10,marginBottom:14}}>
       <label style={{fontSize:12,color:C.mute}}>From <input type="date" value={from} max={to} onChange={(e)=>setFrom(e.target.value)} style={{...INP,padding:"7px 9px",colorScheme:"dark"}}/></label>
       <label style={{fontSize:12,color:C.mute}}>To <input type="date" value={to} min={from} onChange={(e)=>setTo(e.target.value)} style={{...INP,padding:"7px 9px",colorScheme:"dark"}}/></label>
@@ -665,6 +681,7 @@ function Reports({sales,waiters}){
             {opn&&<div style={{padding:"0 13px 12px",borderTop:`1px solid ${C.line}`}}>
               <div style={{padding:"8px 0"}}>{s.items.map((it,i)=>(<div key={i}><div className="flex ac" style={{gap:7,fontSize:12.5,padding:"2px 0"}}><Dot pid={it.printerId}/><span style={{fontFamily:MONO,color:C.mute,width:34}}>{qtyLabel(it)}</span><span style={{flex:1}}>{it.name}</span>{it.vat!=null&&<span style={{fontSize:10,color:C.subtle,fontFamily:MONO}}>{it.vat}%</span>}<span style={{fontFamily:MONO,color:C.mute}}>{euro(lineGross(it))}</span></div>{it.opts&&it.opts.length>0&&<div style={{fontSize:11,color:C.violet,marginLeft:29}}>↳ {optsText(it)}</div>}{it.note&&<div style={{fontSize:11,color:C.blue,marginLeft:29}}>↳ {it.note}</div>}</div>))}</div>
               {s.payments&&s.payments.length>0&&<div style={{borderTop:`1px dashed ${C.line}`,paddingTop:6}}>{s.payments.map((p,i)=>(<div key={i} className="flex ac jb" style={{fontSize:12,color:C.mute,padding:"1px 0"}}><span className="flex ac" style={{gap:5}}><Ico n={p.method==="card"?"card":"cash"} size={12} color={C.mute}/>{p.method==="card"?"Card/POS":"Cash"}{p.lines?" · items":""}</span><span style={{fontFamily:MONO}}>{euro(p.amount)}</span></div>))}</div>}
+              <button className="btn" onClick={async()=>{const r=await act("reprintSale",{id:s.id});const pr=r&&r.print;toast&&toast(pr&&pr.ok?"🖨 Απόδειξη Αρ. "+(s.no?String(s.no).padStart(4,"0"):"—")+" — reprinted":"Reprint sent (no printer — see preview)",pr&&pr.ok?C.green:C.mute);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",marginTop:10,padding:"9px 0",borderRadius:10,background:C.panel2,border:`1px solid ${C.line}`,color:C.text,fontWeight:700,fontSize:12.5,cursor:"pointer"}}><Ico n="printer" size={15} color={C.blue}/> Επανεκτύπωση απόδειξης</button>
             </div>}
           </div>);};
         const GH=({id,label,count,sum,children})=>{const on=!!gexp[id];return(<div style={{border:`1px solid ${C.line}`,borderRadius:12,overflow:"hidden",marginBottom:8}}>
@@ -672,13 +689,36 @@ function Reports({sales,waiters}){
             <span style={{flex:1,textAlign:"left",fontWeight:700,fontSize:13.5}}>{label}</span><span style={{fontSize:11.5,color:C.mute,fontFamily:MONO}}>{count} tx</span><span style={{fontFamily:MONO,fontWeight:800,color:C.amber,fontSize:14}}>{euro(sum)}</span><span style={{color:C.subtle,transform:on?"rotate(90deg)":"none",transition:"transform .12s",display:"flex"}}><Ico n="right" size={16}/></span></button>
           {on&&<div style={{padding:"8px 10px",display:"grid",gap:8}}>{children}</div>}
         </div>);};
-        const dayGroups=(items,pfx)=>bucket(items,dayOf).map((dg)=>(<GH key={dg.key} id={pfx+"d"+dg.key} label={fmtDayLabel(dg.key)} count={dg.items.length} sum={sumOf(dg.items)}>{dg.items.map(orderCard)}</GH>));
+        const dayGroups=(items,pfx)=>bucket(items,dayOf).map((dg)=>(<GH key={dg.key} id={pfx+"d"+dg.key} label={fmtDayLabel(dg.key)} count={dg.items.length} sum={sumOf(dg.items)}><button className="btn" onClick={()=>openZ(dg.items,fmtDayLabel(dg.key),dg.key,dg.key,false)} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",marginBottom:8,padding:"8px 0",borderRadius:9,background:C.panel2,border:`1px solid ${C.line}`,color:C.text,fontWeight:700,fontSize:12,cursor:"pointer"}}><Ico n="printer" size={14} color={C.blue}/> Ζ ημέρας</button>{dg.items.map(orderCard)}</GH>));
         if(distinctDays<=1)return <div style={{display:"grid",gap:8}}>{sorted.map(orderCard)}</div>;
         if(spanDays<=8)return <div>{dayGroups(sorted,"")}</div>;
         if(spanDays<=45)return <div>{bucket(sorted,(s)=>weekStartKey(dayOf(s))).map((wk)=>(<GH key={wk.key} id={"w"+wk.key} label={"Week of "+fmtDShort(wk.key)} count={wk.items.length} sum={sumOf(wk.items)}>{dayGroups(wk.items,"w"+wk.key)}</GH>))}</div>;
         return <div>{bucket(sorted,(s)=>dayOf(s).slice(0,7)).map((mo)=>(<GH key={mo.key} id={"m"+mo.key} label={fmtMonthLabel(mo.key)} count={mo.items.length} sum={sumOf(mo.items)}>{bucket(mo.items,(s)=>weekStartKey(dayOf(s))).map((wk)=>(<GH key={wk.key} id={"m"+mo.key+"w"+wk.key} label={"Week of "+fmtDShort(wk.key)} count={wk.items.length} sum={sumOf(wk.items)}>{dayGroups(wk.items,"m"+mo.key+"w"+wk.key)}</GH>))}</GH>))}</div>;
       })()}
     </div>
+    {zData&&(()=>{const z=computeZ(zData.sales);const ZR=({k,v,big})=>(<div className="flex ac jb" style={{padding:"4px 0",fontSize:big?15:13}}><span style={{color:big?C.text:C.mute,fontWeight:big?800:400}}>{k}</span><span style={{fontFamily:MONO,fontWeight:big?800:700,color:big?C.amber:C.text}}>{v}</span></div>);return(
+      <div onClick={()=>setZData(null)} style={{position:"fixed",inset:0,background:"rgba(10,8,6,.72)",display:"grid",placeItems:"center",zIndex:60,padding:16}}>
+        <div onClick={(e)=>e.stopPropagation()} style={{background:C.panel,border:`1px solid ${C.line}`,borderRadius:16,maxWidth:400,width:"100%",padding:18,maxHeight:"86vh",overflowY:"auto"}}>
+          <div className="flex ac jb" style={{marginBottom:2}}><div style={{fontWeight:800,fontSize:17}}>Αναφορά Ζ</div><button className="btn" onClick={()=>setZData(null)} style={{...ICON,cursor:"pointer"}}><Ico n="x" size={18}/></button></div>
+          <div style={{color:C.mute,fontSize:12,marginBottom:12}}>{zData.label} · συγκεντρωτική (υπολογισμένη τώρα)</div>
+          <ZR k="Αποδείξεις" v={z.count}/>
+          {z.first&&<ZR k="Πρώτη απόδειξη" v={new Date(z.first).toLocaleTimeString("el-GR",{hour:"2-digit",minute:"2-digit"})}/>}
+          {z.last&&<ZR k="Τελευταία απόδειξη" v={new Date(z.last).toLocaleTimeString("el-GR",{hour:"2-digit",minute:"2-digit"})}/>}
+          <ZR k="Τζίρος" v={euro(round2(z.gross))} big/>
+          <div style={{borderTop:`1px solid ${C.line}`,margin:"6px 0"}}/>
+          <ZR k="Καθαρή αξία" v={euro(round2(z.net))}/>
+          {z.rates.map((v)=><ZR key={v.rate} k={"ΦΠΑ "+v.rate+"%"} v={euro(round2(v.vat))}/>)}
+          <div style={{borderTop:`1px solid ${C.line}`,margin:"6px 0"}}/>
+          <ZR k="Μετρητά" v={euro(round2(z.cash))}/>
+          <ZR k="Κάρτα" v={euro(round2(z.card))}/>
+          {Object.keys(z.byW).length>0&&<React.Fragment><div style={{borderTop:`1px solid ${C.line}`,margin:"6px 0"}}/><div style={{fontSize:11,color:C.mute,textTransform:"uppercase",letterSpacing:.5,margin:"2px 0 4px"}}>Ανά σερβιτόρο</div>{Object.keys(z.byW).map((w)=><ZR key={w} k={wname(w)} v={z.byW[w].n+" · "+euro(round2(z.byW[w].g))}/>)}</React.Fragment>}
+          <div style={{fontSize:11,color:C.subtle,textAlign:"center",margin:"12px 0 4px"}}>Δεν αποτελεί νόμιμο Ζ</div>
+          <div className="flex ac" style={{gap:8,marginTop:10}}>
+            <button className="btn" onClick={async()=>{const r=await act("printZ",{from:zData.from,to:zData.to,label:zData.label});const pr=r&&r.print;toast&&toast(pr&&pr.ok?"🖨 Αναφορά Ζ printed":(pr&&pr.reason==="no-receipt-printer"?"Set a Bill printer first":"Ζ sent (no printer — see preview)"),pr&&pr.ok?C.green:C.mute);}} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,padding:"10px 0",borderRadius:10,background:C.amber,color:C.ink,border:"none",fontWeight:800,cursor:"pointer"}}><Ico n="printer" size={16}/> Εκτύπωση Ζ</button>
+            {zData.closing&&<button className="btn" onClick={()=>{if(confirm("Κλείσιμο ημέρας: μηδενισμός αρίθμησης αποδείξεων στο 0; (Οι πωλήσεις ΔΕΝ διαγράφονται.)")){act("closeDay",{});setZData(null);toast&&toast("Κλείσιμο — η αρίθμηση μηδενίστηκε",C.green);}}} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,padding:"10px 0",borderRadius:10,background:C.panel3,color:C.text,border:`1px solid ${C.line}`,fontWeight:700,cursor:"pointer"}}><Ico n="undo" size={15}/> Κλείσιμο & μηδενισμός</button>}
+          </div>
+        </div>
+      </div>);})()}
   </div>);
 }
 const Stat=({label,val,accent})=>(<div style={{background:C.panel,border:`1px solid ${C.line}`,borderRadius:12,padding:"12px 14px"}}><div style={{fontSize:11,color:C.mute,marginBottom:4}}>{label}</div><div style={{fontFamily:MONO,fontSize:22,fontWeight:800,color:accent?C.amber:C.text}}>{val}</div></div>);
@@ -764,7 +804,7 @@ function Setup({state,mob}){
         </div>))}
         <div className="flex wrap" style={{gap:8,marginTop:10}}><input placeholder="Name (e.g. Grill / Pass)" value={prN} onChange={(e)=>setPrN(e.target.value)} style={{...INP,flex:1,minWidth:120}}/><input placeholder="IP" value={prIp} onChange={(e)=>setPrIp(e.target.value)} style={{...INP,width:110}}/>
           <button className="btn" onClick={()=>{if(prN){act("addPrinter",{name:prN,ip:prIp,color:PAL[printers.length%PAL.length]});setPrN("");setPrIp("");}}} style={{...BIG,background:C.amber,color:C.ink,border:"none",fontWeight:700,cursor:"pointer"}}><Ico n="plus" size={16}/> Add printer</button></div>
-        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}><b>Shows</b>: <i>Only its own items</i> = just what you route to it · <i>All except food</i> = every drink/other item, skipping food stations (this is your Bar) · <i>Whole order slip</i> = one combined ticket with everything ordered while items still go to their stations too. <b>Food</b> marks a kitchen station. <b>€ Prices</b> = print prices + total on this ticket (a priced order slip — clearly marked <i>not a legal receipt</i>). <b>Bill</b> = the customer receipt. Each non-Bill printer gets its own tab.</div>
+        <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}><b>Shows</b>: <i>Only its own items</i> = just what you route to it · <i>All except food</i> = every drink/other item, skipping food stations (this is your Bar) · <i>Whole order slip</i> = one combined ticket with everything ordered while items still go to their stations too. <b>Food</b> marks a kitchen station. <b>€ Prices</b> = print prices + total on this ticket (a priced order slip). <b>Bill</b> = the customer receipt at payment. Each non-Bill printer gets its own tab. (The customer “ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ” is controlled in <b>General settings</b> and prints on the Bill printer.)</div>
       </div>
       <div style={{marginTop:8,borderTop:`1px solid ${C.line}`,paddingTop:16}}><button className="btn" onClick={()=>{if(confirm("Reset everything to demo defaults?"))act("reset",{});}} style={{...BIG,background:"transparent",border:`1px solid ${C.red}`,color:C.red,cursor:"pointer"}}>Reset all data to demo defaults</button></div>
     </div>
@@ -772,6 +812,8 @@ function Setup({state,mob}){
       <Title>General settings</Title>
       <div style={CARD}>
         <SettingRow label="Auto-print prep tickets when you Send an order" field="autoPrintPrep" on={state.settings.autoPrintPrep}/>
+        <SettingRow label="Print customer ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ on every Send order" field="orderBillOnSend" on={state.settings.orderBillOnSend}/>
+        <SettingRow label="Print customer ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ again when a table is paid" field="orderBillOnPay" on={state.settings.orderBillOnPay}/>
         <SettingRow label="Auto-print the customer receipt when a table is paid" field="autoPrintReceipt" on={state.settings.autoPrintReceipt}/>
         <SettingRow label="Lock a table to the waiter who opened it" field="lockToOpener" on={state.settings.lockToOpener}/>
         <div style={{color:C.subtle,fontSize:11.5,marginTop:8}}>These apply to everyone. “Lock a table” stops a plain waiter from editing or paying a table another waiter opened — admins and floor managers are never locked.</div>

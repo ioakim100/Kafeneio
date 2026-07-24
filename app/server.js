@@ -81,8 +81,9 @@ const SEED = {
     { id: "w2", name: "Nikos", color: "#7BC49A", role: "waiter", pin: "2222" },
   ],
   shop: { name: "Kafeneío", vat: "", taxOffice: "", address: "", phone: "", dayStart: 5 },
-  settings: { autoPrintPrep: true, autoPrintReceipt: true, lockToOpener: false, autoBackup: true, backupIntervalMin: 10, backupDir: "", backupKeepMonths: 12 },
+  settings: { autoPrintPrep: true, autoPrintReceipt: true, lockToOpener: false, autoBackup: true, backupIntervalMin: 10, backupDir: "", backupKeepMonths: 12, orderBillOnSend: true, orderBillOnPay: false },
   meta: { lastBackupAt: null, lastBackupOk: true, lastBackupMsg: "" },
+  counter: { n: 0, openedAt: null, bizDay: null },
   open: {},
   sales: [],
 };
@@ -170,13 +171,17 @@ function migrate() {
   if (state.settings.backupIntervalMin === undefined) state.settings.backupIntervalMin = 10;
   if (state.settings.backupDir === undefined) state.settings.backupDir = "";
   if (state.settings.backupKeepMonths === undefined) state.settings.backupKeepMonths = 12;
+  if (state.settings.orderBillOnSend === undefined) state.settings.orderBillOnSend = true;
+  if (state.settings.orderBillOnPay === undefined) state.settings.orderBillOnPay = false;
   state.meta = state.meta || { lastBackupAt: null, lastBackupOk: true, lastBackupMsg: "" };
+  if (!state.counter) state.counter = { n: 0, openedAt: null };
   state.printers.forEach((p) => {
     if (p.mode === undefined) p.mode = p.all ? "all" : (/bar/i.test(p.name) ? "rest" : "own");
     if (p.food === undefined) p.food = /kitchen/i.test(p.name);
     if (p.port === undefined) p.port = 9100;
     if (p.width === undefined) p.width = "80";
     if (p.priced === undefined) p.priced = false;
+    if (p.billOnSend === undefined) p.billOnSend = false;
   });
   // tables need a size
   state.tables.forEach((t) => { if (!t.size) t.size = "m"; if (!t.shape) t.shape = "square"; });
@@ -279,7 +284,12 @@ const grTime = (d) => d.toLocaleTimeString("el-GR", { hour: "2-digit", minute: "
 const itemLabel = (it) => it.unit === "kg" ? `${it.weight || 0} kg  ${it.name}` : it.unit === "open" ? it.name : (it.qty > 1 ? `${it.qty}x  ${it.name}` : it.name);
 const pad2 = (label, val, n = 10) => String(label).padEnd(n) + String(val);
 const cols = (l, r, w = 42) => L(String(l) + " ".repeat(Math.max(1, w - String(l).length - String(r).length)) + String(r));
-function buildTicket({ title, table, servedBy, items, total, payments, priced, width, shop, notLegal }) {
+function vatRows(items) {
+  const m = {};
+  for (const it of items) { const g = itemGross(it); const r = it.vat != null ? it.vat : 0; const net = g / (1 + r / 100); (m[r] = m[r] || { rate: r, net: 0, vat: 0 }); m[r].net += net; m[r].vat += g - net; }
+  return Object.values(m).sort((a, b) => a.rate - b.rate);
+}
+function buildTicket({ title, table, servedBy, items, total, payments, priced, width, shop, notLegal, proforma, thanks, docNo, floor, full }) {
   const W = width === "58" ? 32 : 48;
   const now = new Date();
   const col = (l, r) => L(String(l) + " ".repeat(Math.max(1, W - String(l).length - String(r).length)) + String(r));
@@ -291,25 +301,38 @@ function buildTicket({ title, table, servedBy, items, total, payments, priced, w
     if (l2) p.push(L(l2));
     if (shop.phone) p.push(L("Τηλ " + shop.phone));
   }
-  p.push(L(grDate(now)), L(grTime(now)), B(CP.boldOn), L("=".repeat(W)), B(CP.boldOff), B(CP.feed(1)), B(CP.left));
+  if (proforma) p.push(B(CP.boldOn), L("ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ"), B(CP.boldOff));
+  p.push(L(grDate(now)), L(grTime(now)));
+  if (docNo) p.push(L("Αρ. " + docNo));
+  p.push(B(CP.boldOn), L("=".repeat(W)), B(CP.boldOff), B(CP.feed(1)), B(CP.left));
   for (const it of items) {
-    if (priced) p.push(B(CP.boldOn), col(itemLabel(it), "€ " + itemGross(it).toFixed(2)), B(CP.boldOff));
-    else p.push(B(CP.big), B(CP.boldOn), L(itemLabel(it)), B(CP.normal), B(CP.boldOff));
+    if (priced) { p.push(B(CP.boldOn), col(itemLabel(it), "€ " + itemGross(it).toFixed(2)), B(CP.boldOff));
+      if (full && it.unit === "each" && it.qty > 1) p.push(L("   " + it.qty + " x € " + it.price.toFixed(2)));
+      if (full && it.unit === "kg") p.push(L("   " + (it.weight || 0) + " kg x € " + it.price.toFixed(2) + "/kg"));
+    } else p.push(B(CP.big), B(CP.boldOn), L(itemLabel(it)), B(CP.normal), B(CP.boldOff));
     if (it.opts && it.opts.length) p.push(L("   » " + it.opts.map((o) => o.values.join(", ")).join(" / ")));
     if (it.note) p.push(L("   » " + it.note));
   }
   if (priced && typeof total === "number") {
-    p.push(L("-".repeat(W)), B(CP.big), B(CP.boldOn), col("ΣΥΝΟΛΟ", "€ " + total.toFixed(2)), B(CP.normal), B(CP.boldOff));
+    p.push(L("-".repeat(W)));
+    if (full) { const rows = vatRows(items); const netT = rows.reduce((s, v) => s + v.net, 0);
+      p.push(col("Καθαρή αξία", "€ " + netT.toFixed(2)));
+      for (const v of rows) p.push(col("ΦΠΑ " + v.rate + "%", "€ " + v.vat.toFixed(2)));
+      p.push(L("-".repeat(W))); }
+    p.push(B(CP.big), B(CP.boldOn), col("ΣΥΝΟΛΟ", "€ " + total.toFixed(2)), B(CP.normal), B(CP.boldOff));
     for (const pay of payments || []) p.push(L("  " + (pay.method === "card" ? "Κάρτα" : "Μετρητά") + ": € " + pay.amount.toFixed(2)));
   }
-  p.push(B(CP.feed(1)), L("-".repeat(W)));
-  if (table) p.push(B(CP.boldOn), L(pad2("Τραπέζι", table)), B(CP.boldOff));
-  if (servedBy) p.push(L(pad2("Βάρδια", servedBy)));
+  if (!proforma) p.push(B(CP.feed(1)), L("-".repeat(W)));
+  if (!proforma && floor) p.push(L(pad2("Αίθουσα", floor)));
+  if (!proforma && table) p.push(B(CP.boldOn), L(pad2("Τραπέζι", table)), B(CP.boldOff));
+  if (!proforma && servedBy) p.push(L(pad2("Βάρδια", servedBy)));
   if (notLegal) p.push(B(CP.feed(1)), B(CP.center), B(CP.boldOn), L("ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ"), L("ΟΧΙ ΝΟΜΙΜΗ ΑΠΟΔΕΙΞΗ"), B(CP.boldOff), B(CP.left));
+  if (proforma) p.push(B(CP.feed(1)), B(CP.center), L("Δεν αποτελεί νόμιμη απόδειξη"), B(CP.left));
+  if (thanks || proforma) p.push(B(CP.feed(1)), B(CP.center), B(CP.boldOn), L("Ευχαριστούμε!"), B(CP.boldOff), B(CP.left));
   p.push(B(CP.feed(4)), B(CP.cut));
   return Buffer.concat(p);
 }
-function ticketText({ title, table, servedBy, items, total, payments, priced, width, shop, notLegal }) {
+function ticketText({ title, table, servedBy, items, total, payments, priced, width, shop, notLegal, proforma, thanks, docNo, floor, full }) {
   const W = width === "58" ? 32 : 48;
   const now = new Date();
   const line = "-".repeat(W), thick = "=".repeat(W);
@@ -323,20 +346,33 @@ function ticketText({ title, table, servedBy, items, total, payments, priced, wi
     if (l2) out.push(center(l2));
     if (shop.phone) out.push(center("Τηλ " + shop.phone));
   }
-  out.push(center(grDate(now)), center(grTime(now)), thick, "");
+  if (proforma) out.push(center("ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ"));
+  out.push(center(grDate(now)), center(grTime(now)));
+  if (docNo) out.push(center("Αρ. " + docNo));
+  out.push(thick, "");
   for (const it of items) {
     out.push(priced ? col(itemLabel(it), "€ " + itemGross(it).toFixed(2)) : itemLabel(it));
+    if (full && it.unit === "each" && it.qty > 1) out.push("   " + it.qty + " x € " + it.price.toFixed(2));
+    if (full && it.unit === "kg") out.push("   " + (it.weight || 0) + " kg x € " + it.price.toFixed(2) + "/kg");
     if (it.opts && it.opts.length) out.push("   » " + it.opts.map((o) => o.values.join(", ")).join(" / "));
     if (it.note) out.push("   » " + it.note);
   }
   if (priced && typeof total === "number") {
-    out.push(line, col("ΣΥΝΟΛΟ", "€ " + total.toFixed(2)));
+    out.push(line);
+    if (full) { const rows = vatRows(items); const netT = rows.reduce((s, v) => s + v.net, 0);
+      out.push(col("Καθαρή αξία", "€ " + netT.toFixed(2)));
+      for (const v of rows) out.push(col("ΦΠΑ " + v.rate + "%", "€ " + v.vat.toFixed(2)));
+      out.push(line); }
+    out.push(col("ΣΥΝΟΛΟ", "€ " + total.toFixed(2)));
     for (const pay of payments || []) out.push("  " + (pay.method === "card" ? "Κάρτα" : "Μετρητά") + ": € " + pay.amount.toFixed(2));
   }
-  out.push("", line);
-  if (table) out.push(pad2("Τραπέζι", table));
-  if (servedBy) out.push(pad2("Βάρδια", servedBy));
+  if (!proforma) out.push("", line);
+  if (!proforma && floor) out.push(pad2("Αίθουσα", floor));
+  if (!proforma && table) out.push(pad2("Τραπέζι", table));
+  if (!proforma && servedBy) out.push(pad2("Βάρδια", servedBy));
   if (notLegal) out.push("", center("ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ"), center("ΟΧΙ ΝΟΜΙΜΗ ΑΠΟΔΕΙΞΗ"));
+  if (proforma) out.push("", center("Δεν αποτελεί νόμιμη απόδειξη"));
+  if (thanks || proforma) out.push("", center("Ευχαριστούμε!"));
   return out.join("\n");
 }
 function sendToPrinter(ip, port, buffer) {
@@ -372,19 +408,89 @@ async function printPrep(printer, tableName, waiterId, items) {
 }
 async function printReceipt(sale) {
   const pr = printerById(state.receiptPrinterId);
-  const args = { title: "RECEIPT", table: sale.tableName, servedBy: waiterName(sale.waiterId), items: sale.items, total: sale.total, payments: sale.payments, priced: true, width: pr && pr.width, shop: state.shop };
+  const args = { title: "RECEIPT", table: sale.tableName, servedBy: waiterName(sale.waiterId), floor: sale.floorName, items: sale.items, total: sale.total, payments: sale.payments, priced: true, full: true, docNo: sale.no ? String(sale.no).padStart(4, "0") : undefined, width: pr && pr.width, shop: state.shop, thanks: true };
   logTicket((pr ? pr.name : "Receipt") + (pr && pr.ip ? " @ " + pr.ip : " (no IP set)"), args);
   const buf = buildTicket(args);
   if (!pr || !pr.ip) return { ok: false, reason: "no-ip" };
   try { await sendToPrinter(pr.ip, pr.port, buf); return { ok: true }; } catch { return { ok: false, reason: "offline" }; }
+}
+/* ---- business day + Z (computed live from sales, never stored) ---- */
+function bizDayKey(d) {
+  const start = (state.shop && state.shop.dayStart) || 0;
+  const x = new Date((typeof d === "number" ? d : new Date(d).getTime()) - start * 3600000);
+  return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+}
+function aggZ(arr) {
+  let gross = 0, cash = 0, card = 0, first = null, last = null; const rates = {}; const byW = {};
+  for (const s of arr) {
+    gross += s.total || 0;
+    const t = new Date(s.closedAt).getTime(); if (first == null || t < first) first = t; if (last == null || t > last) last = t;
+    for (const it of (s.items || [])) { const g = itemGross(it); const r = it.vat != null ? it.vat : 0; const net = g / (1 + r / 100); (rates[r] = rates[r] || { rate: r, net: 0, vat: 0, gross: 0 }); rates[r].net += net; rates[r].vat += g - net; rates[r].gross += g; }
+    for (const p of (s.payments || [])) { if (p.method === "card") card += p.amount; else cash += p.amount; }
+    const w = s.waiterId || "?"; (byW[w] = byW[w] || { n: 0, g: 0 }); byW[w].n += 1; byW[w].g += s.total || 0;
+  }
+  const net = Object.values(rates).reduce((s, v) => s + v.net, 0), vat = Object.values(rates).reduce((s, v) => s + v.vat, 0);
+  return { count: arr.length, gross: round2(gross), net: round2(net), vat: round2(vat), cash: round2(cash), card: round2(card), first, last, rates: Object.values(rates).sort((a, b) => a.rate - b.rate), byW };
+}
+function zLines(agg, label, W) {
+  const col = (l, r) => { l = String(l); r = String(r); return l + " ".repeat(Math.max(1, W - l.length - r.length)) + r; };
+  const center = (s) => { s = String(s); return " ".repeat(Math.max(0, Math.floor((W - s.length) / 2))) + s; };
+  const o = [];
+  if (state.shop && state.shop.name) o.push(center(state.shop.name));
+  o.push(center("ΑΝΑΦΟΡΑ Ζ (ΣΥΓΚΕΝΤΡΩΤΙΚΗ)"));
+  if (label) o.push(center(label));
+  o.push("=".repeat(W), "");
+  o.push(col("Αποδείξεις", String(agg.count)));
+  if (agg.first) o.push(col("Πρώτη", grTime(new Date(agg.first))));
+  if (agg.last) o.push(col("Τελευταία", grTime(new Date(agg.last))));
+  o.push(col("Τζίρος", "€ " + agg.gross.toFixed(2)));
+  o.push(col("Καθαρή αξία", "€ " + agg.net.toFixed(2)));
+  for (const v of agg.rates) o.push(col("ΦΠΑ " + v.rate + "%", "€ " + v.vat.toFixed(2)));
+  o.push("-".repeat(W));
+  o.push(col("Μετρητά", "€ " + agg.cash.toFixed(2)));
+  o.push(col("Κάρτα", "€ " + agg.card.toFixed(2)));
+  const ws = Object.keys(agg.byW);
+  if (ws.length) { o.push("-".repeat(W), "Ανά σερβιτόρο:"); for (const w of ws) o.push(col("  " + waiterName(w), agg.byW[w].n + " · € " + agg.byW[w].g.toFixed(2))); }
+  o.push("", center("Δεν αποτελεί νόμιμο Ζ"));
+  return o;
+}
+function buildZTicket(agg, label, width) {
+  const W = width === "58" ? 32 : 48;
+  const p = [B(CP.init), B(CP.center), B(CP.boldOn)];
+  const lines = zLines(agg, label, W);
+  lines.forEach((l, i) => { if (i === 2) p.push(B(CP.boldOff), B(CP.left)); p.push(L(l)); });
+  p.push(B(CP.feed(4)), B(CP.cut));
+  return Buffer.concat(p);
+}
+function zTicketText(agg, label, width) { return zLines(agg, label, width === "58" ? 32 : 48).join("\n"); }
+async function printOrderBill(printer, items) {                // ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ — items with prices, NO total (total only on the pay receipt)
+  const args = { items, payments: [], priced: true, width: printer.width, shop: state.shop, proforma: true };
+  logTicket(printer.name + (printer.ip ? " @ " + printer.ip : " (no IP set)") + " · ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ", args);
+  const buf = buildTicket(args);
+  if (!printer.ip) return { name: printer.name, ok: false, reason: "no-ip" };
+  try { await sendToPrinter(printer.ip, printer.port, buf); return { name: printer.name, ok: true }; }
+  catch { return { name: printer.name, ok: false, reason: "offline" }; }
 }
 
 /* ---------------- actions ---------------- */
 const ADMIN = new Set(["addProduct", "deleteProduct", "addFloor", "deleteFloor", "addTable", "deleteTable",
   "updateTable", "moveTable", "addPrinter", "updatePrinter", "deletePrinter", "setReceiptPrinter",
   "addWaiter", "updateWaiter", "deleteWaiter", "reset", "setShop", "setSetting", "seedDemoSales",
-  "setBackup", "backupNow", "listBackups", "restoreBackup", "importData"]);
+  "setBackup", "backupNow", "listBackups", "restoreBackup", "importData", "closeDay", "printZ"]);
 
+function consolidate(o) {                                   // merge identical SENT products into one line (same id, unit each, same note, no options, not paid)
+  const paid = new Set(); for (const p of (o.payments || [])) for (const ln of (p.lines || [])) paid.add(ln.lid);
+  const out = [];
+  for (const it of o.items) {
+    const canMerge = it.sent && it.unit === "each" && !(it.opts && it.opts.length) && !paid.has(it.lid);
+    if (canMerge) {
+      const m = out.find((x) => x.sent && x.id === it.id && x.unit === "each" && !(x.opts && x.opts.length) && (x.note || "") === (it.note || "") && !paid.has(x.lid));
+      if (m) { m.qty += it.qty; m.doneQty = (m.doneQty || 0) + (it.doneQty || 0); continue; }
+    }
+    out.push(it);
+  }
+  o.items = out;
+}
 async function handleAction(type, payload = {}, waiterId) {
   const actor = state.waiters.find((w) => w.id === waiterId);
   if (ADMIN.has(type) && (!actor || actor.role !== "admin")) return { ok: false, error: "admin_only" };
@@ -427,6 +533,8 @@ async function handleAction(type, payload = {}, waiterId) {
           results.push(await printPrep(pr, t?.name, waiterId, items));
         }
       }
+      if (state.settings.orderBillOnSend) { const rp = printerById(state.receiptPrinterId); if (rp) results.push(await printOrderBill(rp, newly)); }
+      consolidate(o);
       print = { ok: results.every((r) => r.ok), results, fired: newly.length, muted: !state.settings.autoPrintPrep };
       break;
     }
@@ -434,6 +542,12 @@ async function handleAction(type, payload = {}, waiterId) {
       const o = state.open[p.tableId]; if (!o) break;
       const t = state.tables.find((x) => x.id === p.tableId);
       print = await printReceipt({ tableName: t?.name, waiterId, items: o.items, total: orderTotal(o), payments: o.payments });
+      break;
+    }
+    case "printOrder": {                                    // manual: print the ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ on demand
+      const o = state.open[p.tableId]; if (!o) { print = { ok: false }; break; }
+      const rp = printerById(state.receiptPrinterId);
+      print = rp ? await printOrderBill(rp, o.items) : { ok: false, reason: "no-receipt-printer" };
       break;
     }
     case "pay": {
@@ -444,12 +558,19 @@ async function handleAction(type, payload = {}, waiterId) {
       if (paid + 0.005 >= total) {
         const t = state.tables.find((x) => x.id === p.tableId);
         const methods = [...new Set(o.payments.map((x) => x.method))];
-        sale = { id: uid(), tableId: p.tableId, tableName: t?.name || "?", items: o.items, total, payments: o.payments,
+        state.counter = state.counter || { n: 0, openedAt: null, bizDay: null };
+        const bd = bizDayKey(Date.now());
+        if (state.counter.bizDay && state.counter.bizDay !== bd) state.counter = { n: 0, openedAt: new Date().toISOString(), bizDay: bd };  // new business day → numbering restarts
+        if (!state.counter.bizDay) state.counter.bizDay = bd;
+        const no = (state.counter.n || 0) + 1; state.counter.n = no; if (!state.counter.openedAt) state.counter.openedAt = new Date().toISOString();
+        const fl = state.floors.find((f) => f.id === (t && t.floorId));
+        sale = { id: uid(), no, tableId: p.tableId, tableName: t?.name || "?", floorName: fl ? fl.name : "", items: o.items, total, payments: o.payments,
           method: methods.length > 1 ? "split" : methods[0], waiterId: o.openedBy || waiterId, closedAt: new Date().toISOString() };
         state.sales.unshift(sale);
         insertSale(sale);
         delete state.open[p.tableId];
         print = state.settings.autoPrintReceipt ? await printReceipt(sale) : { ok: false, reason: "off" };
+        if (state.settings.orderBillOnPay) { const rp = printerById(state.receiptPrinterId); if (rp) await printOrderBill(rp, sale.items); }
       }
       break;
     }
@@ -489,6 +610,16 @@ async function handleAction(type, payload = {}, waiterId) {
     case "backupNow": return { ok: true, backup: writeSnapshot("manual") };
     case "listBackups": return { ok: true, backups: listBackups() };
     case "restoreBackup": { try { restoreFromFile(p.dir, p.name); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } }
+    case "closeDay": { const prev = (state.counter && state.counter.n) || 0; state.counter = { n: 0, openedAt: new Date().toISOString() }; return { ok: true, closed: { count: prev } }; }
+    case "reprintSale": { const s = state.sales.find((x) => x.id === p.id); print = s ? await printReceipt(s) : { ok: false, reason: "not-found" }; break; }
+    case "printZ": {
+      const arr = state.sales.filter((s) => { const d = bizDayKey(s.closedAt); return (!p.from || d >= p.from) && (!p.to || d <= p.to); });
+      const agg = aggZ(arr); const pr = printerById(state.receiptPrinterId); const W = pr && pr.width === "58" ? 32 : 48;
+      if (PRINT_DEBUG) { const bar = "=".repeat(W + 4); console.log("\n" + bar + "\n  🖨  PRINT → " + (pr ? pr.name : "Receipt") + " · ΑΝΑΦΟΡΑ Ζ   (" + (pr && pr.width === "58" ? "58" : "80") + "mm)\n" + bar + "\n" + zTicketText(agg, p.label || "", pr && pr.width).split("\n").map((l) => "  " + l).join("\n") + "\n" + bar + "\n"); }
+      if (pr && pr.ip) { try { await sendToPrinter(pr.ip, pr.port, buildZTicket(agg, p.label || "", pr.width)); print = { ok: true }; } catch { print = { ok: false, reason: "offline" }; } }
+      else print = { ok: false, reason: pr ? "no-ip" : "no-receipt-printer" };
+      break;
+    }
     case "importData": { try { applyFullState(p.data); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } }
     case "seedDemoSales": {
       const menu = state.menu.length ? state.menu : [{ id: "d", name: "Coffee", price: 2, vat: 13, printerId: "pb" }];
