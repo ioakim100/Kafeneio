@@ -338,17 +338,32 @@ function sendToPrinter(ip, port, buffer) {
     s.on("error", () => reject(new Error("offline")));
   });
 }
+/* --- TESTING: dump every printout to the terminal so we can perfect the layout.
+       Turn off later with env  PRINT_DEBUG=0  (or just remove this block).      --- */
+const PRINT_DEBUG = process.env.PRINT_DEBUG !== "0";
+function logTicket(dest, args) {
+  if (!PRINT_DEBUG) return;
+  const w = args.width === "58" ? 32 : 48;
+  const bar = "=".repeat(w + 4);
+  const body = ticketText(args).split("\n").map((l) => "  " + l).join("\n");
+  console.log("\n" + bar + "\n  🖨  PRINT → " + dest + "   (" + (args.width === "58" ? "58" : "80") + "mm)\n" + bar + "\n" + body + "\n" + bar + "\n");
+}
+
 async function printPrep(printer, tableName, waiterId, items) {
   const priced = !!printer.priced;
   const total = priced ? round2(items.reduce((s, x) => s + itemGross(x), 0)) : undefined;
-  const buf = buildTicket({ title: printer.name.toUpperCase(), table: tableName, servedBy: waiterName(waiterId), items, priced, total, width: printer.width, notLegal: priced });
+  const args = { title: printer.name.toUpperCase(), table: tableName, servedBy: waiterName(waiterId), items, priced, total, width: printer.width, notLegal: priced };
+  logTicket(printer.name + (printer.ip ? " @ " + printer.ip : " (no IP set)"), args);
+  const buf = buildTicket(args);
   if (!printer.ip) return { name: printer.name, ok: false, reason: "no-ip" };
   try { await sendToPrinter(printer.ip, printer.port, buf); return { name: printer.name, ok: true }; }
   catch { return { name: printer.name, ok: false, reason: "offline" }; }
 }
 async function printReceipt(sale) {
   const pr = printerById(state.receiptPrinterId);
-  const buf = buildTicket({ title: "RECEIPT", table: sale.tableName, servedBy: waiterName(sale.waiterId), items: sale.items, total: sale.total, payments: sale.payments, priced: true, width: pr && pr.width, shop: state.shop });
+  const args = { title: "RECEIPT", table: sale.tableName, servedBy: waiterName(sale.waiterId), items: sale.items, total: sale.total, payments: sale.payments, priced: true, width: pr && pr.width, shop: state.shop };
+  logTicket((pr ? pr.name : "Receipt") + (pr && pr.ip ? " @ " + pr.ip : " (no IP set)"), args);
+  const buf = buildTicket(args);
   if (!pr || !pr.ip) return { ok: false, reason: "no-ip" };
   try { await sendToPrinter(pr.ip, pr.port, buf); return { ok: true }; } catch { return { ok: false, reason: "offline" }; }
 }
