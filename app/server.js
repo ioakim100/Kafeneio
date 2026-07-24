@@ -274,58 +274,69 @@ const CP = { init: [ESC, 0x40], boldOn: [ESC, 0x45, 1], boldOff: [ESC, 0x45, 0],
   big: [GS, 0x21, 0x11], normal: [GS, 0x21, 0x00], feed: (n) => [ESC, 0x64, n], cut: [GS, 0x56, 0x42, 0x00] };
 const L = (s = "") => Buffer.from(s + "\n", "latin1");
 const B = (a) => Buffer.from(a);
+const grDate = (d) => { const s = d.toLocaleDateString("el-GR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); return s.charAt(0).toUpperCase() + s.slice(1); };
+const grTime = (d) => d.toLocaleTimeString("el-GR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const itemLabel = (it) => it.unit === "kg" ? `${it.weight || 0} kg  ${it.name}` : it.unit === "open" ? it.name : (it.qty > 1 ? `${it.qty}x  ${it.name}` : it.name);
+const pad2 = (label, val, n = 10) => String(label).padEnd(n) + String(val);
 const cols = (l, r, w = 42) => L(String(l) + " ".repeat(Math.max(1, w - String(l).length - String(r).length)) + String(r));
 function buildTicket({ title, table, servedBy, items, total, payments, priced, width, shop, notLegal }) {
   const W = width === "58" ? 32 : 48;
+  const now = new Date();
   const col = (l, r) => L(String(l) + " ".repeat(Math.max(1, W - String(l).length - String(r).length)) + String(r));
-  const p = [B(CP.init), B(CP.center), B(CP.big), B(CP.boldOn), L(priced && shop && shop.name ? shop.name : title), B(CP.normal), B(CP.boldOff)];
-  if (priced && shop) {                                   // business header on the customer bill
+  const p = [B(CP.init), B(CP.center)];
+  if (priced && shop && shop.name) {                      // customer bill: business header on top
+    p.push(B(CP.big), B(CP.boldOn), L(shop.name), B(CP.normal), B(CP.boldOff));
     if (shop.address) p.push(L(shop.address));
-    const l2 = [shop.vat && ("AFM " + shop.vat), shop.taxOffice && ("DOY " + shop.taxOffice)].filter(Boolean).join("  ");
+    const l2 = [shop.vat && ("ΑΦΜ " + shop.vat), shop.taxOffice && ("ΔΟΥ " + shop.taxOffice)].filter(Boolean).join("  ");
     if (l2) p.push(L(l2));
-    if (shop.phone) p.push(L("Tel " + shop.phone));
+    if (shop.phone) p.push(L("Τηλ " + shop.phone));
   }
-  if (table) p.push(B(CP.boldOn), L("Table " + table), B(CP.boldOff));
-  if (servedBy) p.push(L("Served by " + servedBy));
-  p.push(L(new Date().toLocaleString()), B(CP.left), L("-".repeat(W)));
+  p.push(L(grDate(now)), L(grTime(now)), B(CP.boldOn), L("=".repeat(W)), B(CP.boldOff), B(CP.feed(1)), B(CP.left));
   for (const it of items) {
-    if (priced) p.push(col(`${(qtyStr(it)+" "+it.name).trim()}`, "EUR " + itemGross(it).toFixed(2)));
-    else p.push(B(CP.boldOn), L(`${(qtyStr(it)+" "+it.name).trim()}`), B(CP.boldOff));
-    if (it.opts && it.opts.length) p.push(L("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / ")));
-    if (it.note) p.push(L("   >> " + it.note));
+    if (priced) p.push(B(CP.boldOn), col(itemLabel(it), "€ " + itemGross(it).toFixed(2)), B(CP.boldOff));
+    else p.push(B(CP.big), B(CP.boldOn), L(itemLabel(it)), B(CP.normal), B(CP.boldOff));
+    if (it.opts && it.opts.length) p.push(L("   » " + it.opts.map((o) => o.values.join(", ")).join(" / ")));
+    if (it.note) p.push(L("   » " + it.note));
   }
   if (priced && typeof total === "number") {
-    p.push(L("-".repeat(W)), B(CP.big), B(CP.boldOn), col("TOTAL", "EUR " + total.toFixed(2)), B(CP.normal), B(CP.boldOff));
-    for (const pay of payments || []) p.push(L(`  ${pay.method === "card" ? "Card/POS" : "Cash"}: EUR ${pay.amount.toFixed(2)}`));
+    p.push(L("-".repeat(W)), B(CP.big), B(CP.boldOn), col("ΣΥΝΟΛΟ", "€ " + total.toFixed(2)), B(CP.normal), B(CP.boldOff));
+    for (const pay of payments || []) p.push(L("  " + (pay.method === "card" ? "Κάρτα" : "Μετρητά") + ": € " + pay.amount.toFixed(2)));
   }
-  if (notLegal) p.push(B(CP.center), B(CP.boldOn), L("* ORDER SLIP - NOT A LEGAL RECEIPT *"), B(CP.boldOff), B(CP.left));
-  p.push(B(CP.feed(1)), B(CP.center), L("* * *"), B(CP.left), B(CP.feed(3)), B(CP.cut));
+  p.push(B(CP.feed(1)), L("-".repeat(W)));
+  if (table) p.push(B(CP.boldOn), L(pad2("Τραπέζι", table)), B(CP.boldOff));
+  if (servedBy) p.push(L(pad2("Βάρδια", servedBy)));
+  if (notLegal) p.push(B(CP.feed(1)), B(CP.center), B(CP.boldOn), L("ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ"), L("ΟΧΙ ΝΟΜΙΜΗ ΑΠΟΔΕΙΞΗ"), B(CP.boldOff), B(CP.left));
+  p.push(B(CP.feed(4)), B(CP.cut));
   return Buffer.concat(p);
 }
 function ticketText({ title, table, servedBy, items, total, payments, priced, width, shop, notLegal }) {
   const W = width === "58" ? 32 : 48;
-  const line = "-".repeat(W);
+  const now = new Date();
+  const line = "-".repeat(W), thick = "=".repeat(W);
   const col = (l, r) => { l = String(l); r = String(r); return l + " ".repeat(Math.max(1, W - l.length - r.length)) + r; };
-  const out = [priced && shop && shop.name ? shop.name : title];
-  if (priced && shop) {
-    if (shop.address) out.push(shop.address);
-    const l2 = [shop.vat && ("AFM " + shop.vat), shop.taxOffice && ("DOY " + shop.taxOffice)].filter(Boolean).join("  ");
-    if (l2) out.push(l2);
-    if (shop.phone) out.push("Tel " + shop.phone);
+  const center = (s) => { s = String(s); const pad = Math.max(0, Math.floor((W - s.length) / 2)); return " ".repeat(pad) + s; };
+  const out = [];
+  if (priced && shop && shop.name) {
+    out.push(center(shop.name));
+    if (shop.address) out.push(center(shop.address));
+    const l2 = [shop.vat && ("ΑΦΜ " + shop.vat), shop.taxOffice && ("ΔΟΥ " + shop.taxOffice)].filter(Boolean).join("  ");
+    if (l2) out.push(center(l2));
+    if (shop.phone) out.push(center("Τηλ " + shop.phone));
   }
-  if (table) out.push("Table " + table);
-  if (servedBy) out.push("Served by " + servedBy);
-  out.push(new Date().toLocaleString(), line);
+  out.push(center(grDate(now)), center(grTime(now)), thick, "");
   for (const it of items) {
-    out.push(priced ? col(`${(qtyStr(it)+" "+it.name).trim()}`, "EUR " + itemGross(it).toFixed(2)) : `${(qtyStr(it)+" "+it.name).trim()}`);
-    if (it.opts && it.opts.length) out.push("   >> " + it.opts.map((o) => o.values.join(", ")).join(" / "));
-    if (it.note) out.push("   >> " + it.note);
+    out.push(priced ? col(itemLabel(it), "€ " + itemGross(it).toFixed(2)) : itemLabel(it));
+    if (it.opts && it.opts.length) out.push("   » " + it.opts.map((o) => o.values.join(", ")).join(" / "));
+    if (it.note) out.push("   » " + it.note);
   }
   if (priced && typeof total === "number") {
-    out.push(line, col("TOTAL", "EUR " + total.toFixed(2)));
-    for (const pay of payments || []) out.push("  " + (pay.method === "card" ? "Card/POS" : "Cash") + ": EUR " + pay.amount.toFixed(2));
+    out.push(line, col("ΣΥΝΟΛΟ", "€ " + total.toFixed(2)));
+    for (const pay of payments || []) out.push("  " + (pay.method === "card" ? "Κάρτα" : "Μετρητά") + ": € " + pay.amount.toFixed(2));
   }
-  if (notLegal) out.push("* ORDER SLIP - NOT A LEGAL RECEIPT *");
+  out.push("", line);
+  if (table) out.push(pad2("Τραπέζι", table));
+  if (servedBy) out.push(pad2("Βάρδια", servedBy));
+  if (notLegal) out.push("", center("ΔΕΛΤΙΟ ΠΑΡΑΓΓΕΛΙΑΣ"), center("ΟΧΙ ΝΟΜΙΜΗ ΑΠΟΔΕΙΞΗ"));
   return out.join("\n");
 }
 function sendToPrinter(ip, port, buffer) {
